@@ -191,6 +191,16 @@ ul{margin:0;padding:0;list-style:none}
 }
 .todo .meta .over{color:var(--danger)}
 .todo .meta .today{color:var(--accent)}
+/* 行ごとの「カレンダーに入れる」ボタン */
+.todo .calbtn{
+  flex:0 0 auto;border:0;background:transparent;color:var(--ink-3);
+  padding:7px;margin:-3px -4px 0 0;border-radius:9px;cursor:pointer;
+}
+.todo .calbtn svg{width:20px;height:20px;display:block}
+.todo .calbtn.on{color:var(--accent)}
+.todo .calbtn:active{background:var(--pill)}
+.todo.done .calbtn{opacity:.35}
+
 .todo .tabname{
   flex:0 0 auto;font-size:.68rem;color:var(--ink-3);background:var(--pill);
   border-radius:5px;padding:2px 7px;margin-top:2px;

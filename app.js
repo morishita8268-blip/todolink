@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.5.0';
+  var VERSION = '1.6.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
 
@@ -372,7 +372,6 @@
         if (dl) meta.push('<span class="' + dueClass(t) + '">' + esc(dl) + '</span>');
         var rl = repeatLabel(t.repeat);
         if (rl) meta.push('<span>' + esc(rl) + '</span>');
-        if (t.gcalEventId) meta.push('<span>📅</span>');
         if (t.note) meta.push('<span>📝</span>');
       }
       var tabChip = '';
@@ -385,15 +384,62 @@
         '<button class="box" type="button" aria-label="完了"></button>' +
         '<div class="body"><div class="txt">' + esc(t.text) + '</div>' +
         (meta.length ? '<div class="meta">' + meta.join('') + '</div>' : '') + '</div>' +
-        tabChip;
+        tabChip +
+        calBtnHtml(t);
 
       li.querySelector('.box').onclick = function (e) { e.stopPropagation(); toggle(t.id); };
       li.querySelector('.body').onclick = function () { if (!justDragged) openEdit(t.id); };
+      li.querySelector('.calbtn').onclick = function (e) { e.stopPropagation(); onCalBtn(t.id); };
       if (!searching) attachDrag(li);
       list.appendChild(li);
     });
 
     updateBadge();
+  }
+
+  /* ---------------- 行ごとのカレンダーボタン ---------------- */
+  var CAL_FRAME = '<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/>';
+  function calBtnHtml(t) {
+    var on = !!t.gcalEventId;
+    var mark = on ? '<path d="M8.8 15.4l2 2 4.4-4.4"/>' : '<path d="M12 13v5M9.5 15.5h5"/>';
+    return '<button class="calbtn' + (on ? ' on' : '') + '" type="button" ' +
+      'aria-label="' + (on ? 'カレンダーから外す' : 'カレンダーに入れる') + '" ' +
+      'title="' + (on ? 'カレンダーに登録済み' : 'カレンダーに入れる') + '">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' + CAL_FRAME + mark + '</svg></button>';
+  }
+
+  /** ボタンを押したとき。日時が無ければ先に聞く。 */
+  function onCalBtn(id) {
+    var t = S.todos.filter(function (x) { return x.id === id; })[0];
+    if (!t) return;
+
+    if (!GCal.hasClientId() || !GCal.isConnected()) {
+      toast('先にGoogleカレンダーにつないでください');
+      fillSettings(); openSheet('settingsSheet');
+      return;
+    }
+    if (!S.settings.gcal.calendarId) { toast('同期先カレンダーを選んでください'); fillSettings(); openSheet('settingsSheet'); return; }
+
+    // すでに入っている → 外す
+    if (t.gcalEventId) {
+      confirmBox('カレンダーから外す', '「' + t.text + '」の予定を削除します。ToDoは残ります。', '外す')
+        .then(function (ok) {
+          if (!ok) return;
+          GCal.remove(S.settings.gcal.calendarId, t.gcalEventId).then(function () {
+            t.gcalEventId = ''; save(); renderList(); toast('カレンダーから外しました');
+          }).catch(function (e) { toast('外せませんでした：' + e.message); });
+        });
+      return;
+    }
+
+    // 日時が無いと予定にできないので、その場で聞く
+    if (!t.dueDate) {
+      editing = JSON.parse(JSON.stringify(t));
+      openDue('row', editing);
+      return;
+    }
+    pushOne(t);
   }
 
   function updateBadge() {
@@ -732,6 +778,11 @@
   function syncDueNote() {
     var el = $('dueGcalNote');
     var g = S.settings.gcal;
+    if (dueTarget === 'row') {
+      el.textContent = 'カレンダーに入れるには日時が必要です。決めると「' + (g.calendarName || 'カレンダー') + '」に登録します。';
+      el.className = 'due-note on';
+      return;
+    }
     if (GCal.isConnected() && g.calendarId && g.auto) {
       el.textContent = '決定すると「' + (g.calendarName || 'カレンダー') + '」に予定として追加され、その時刻に通知が鳴ります。';
       el.className = 'due-note on';
@@ -1188,12 +1239,27 @@
     });
     $('dueOk').onclick = function () {
       var d = readDue();
-      if (dueTarget === 'compose') { pendingDue = d; showDuePreview(); }
-      else { editing.dueDate = d.dueDate; editing.dueTime = d.dueTime; editing.repeat = d.repeat; refreshEditDueBtn(); }
+      if (dueTarget === 'compose') {
+        pendingDue = d; showDuePreview();
+      } else if (dueTarget === 'row') {
+        // 行のカレンダーボタンから来た場合：その場で本体に書いて送る
+        var t = S.todos.filter(function (x) { return x.id === editing.id; })[0];
+        closeSheet('dueSheet');
+        if (!t) return;
+        if (!d.dueDate) { toast('日付を選んでください'); return; }
+        t.dueDate = d.dueDate; t.dueTime = d.dueTime; t.repeat = d.repeat;
+        save(); renderList();
+        pushOne(t);
+        return;
+      } else {
+        editing.dueDate = d.dueDate; editing.dueTime = d.dueTime; editing.repeat = d.repeat;
+        refreshEditDueBtn();
+      }
       closeSheet('dueSheet');
     };
     $('dueClear').onclick = function () {
       if (dueTarget === 'compose') clearPendingDue();
+      else if (dueTarget === 'row') { /* 何もせず閉じる */ }
       else { editing.dueDate = ''; editing.dueTime = ''; editing.repeat = { type: 'none' }; refreshEditDueBtn(); }
       closeSheet('dueSheet');
     };
