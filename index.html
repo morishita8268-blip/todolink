@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ToDoリンク">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css?v=150">
+<title>ToDoリンク</title>
+<script>
+/* 自己修復ブート — 外部ファイルより先に、ここだけで完結して動く必要がある。
+   以前のサービスワーカーが app.js の代わりに index.html を返してしまい、
+   アプリ全体が起動できなくなる事故があった。その状態からでも抜け出せるようにする。 */
+(function () {
+  var KEY = 'todolink.swfix';
+  var jobs = [];
+  if ('serviceWorker' in navigator) {
+    jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+      return Promise.all(rs.map(function (r) { return r.unregister(); }));
+    }).catch(function () {}));
+  }
+  if (window.caches && caches.keys) {
+    jobs.push(caches.keys().then(function (ks) {
+      return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+    }).catch(function () {}));
+  }
+  // いま開いているページがサービスワーカーの支配下なら、外したうえで一度だけ読み直す
+  var controlled = 'serviceWorker' in navigator && navigator.serviceWorker.controller;
+  if (controlled && !sessionStorage.getItem(KEY)) {
+    try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+    Promise.all(jobs).then(function () {
+      location.replace(location.pathname + '?r=' + Date.now());
+    });
+  }
+})();
+</script>
+</head>
+<body>
+
+<div id="app" class="app">
+
+  <header class="topbar">
+    <div class="topbar-row">
+      <button id="btnMenu" class="icon-btn" aria-label="メニュー">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <button type="button" id="syncState" class="sync-state" aria-label="同期の状態">
+        <span class="sdot"></span><span id="syncText"></span>
+      </button>
+      <div class="grow"></div>
+      <button id="btnSearch" class="icon-btn" aria-label="検索">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 17 17"/></svg>
+      </button>
+      <button id="btnSettings" class="icon-btn" aria-label="設定">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.1 14.6a1.5 1.5 0 0 0 .3 1.7l.1.1a1.9 1.9 0 1 1-2.7 2.7l-.1-.1a1.5 1.5 0 0 0-1.7-.3 1.5 1.5 0 0 0-.9 1.4v.2a1.9 1.9 0 0 1-3.8 0v-.1a1.5 1.5 0 0 0-1-1.4 1.5 1.5 0 0 0-1.7.3l-.1.1a1.9 1.9 0 1 1-2.7-2.7l.1-.1a1.5 1.5 0 0 0 .3-1.7 1.5 1.5 0 0 0-1.4-.9h-.2a1.9 1.9 0 0 1 0-3.8h.1a1.5 1.5 0 0 0 1.4-1 1.5 1.5 0 0 0-.3-1.7l-.1-.1a1.9 1.9 0 1 1 2.7-2.7l.1.1a1.5 1.5 0 0 0 1.7.3h.1a1.5 1.5 0 0 0 .9-1.4v-.2a1.9 1.9 0 0 1 3.8 0v.1a1.5 1.5 0 0 0 .9 1.4 1.5 1.5 0 0 0 1.7-.3l.1-.1a1.9 1.9 0 1 1 2.7 2.7l-.1.1a1.5 1.5 0 0 0-.3 1.7v.1a1.5 1.5 0 0 0 1.4.9h.2a1.9 1.9 0 0 1 0 3.8h-.1a1.5 1.5 0 0 0-1.4.9z"/></svg>
+      </button>
+    </div>
+
+    <div id="searchRow" class="search-row" hidden>
+      <input id="searchInput" type="search" placeholder="すべてのタブから検索" autocomplete="off">
+      <button type="button" id="searchClose" class="text-btn">閉じる</button>
+    </div>
+
+    <nav class="tabbar" id="tabbar"></nav>
+  </header>
+
+  <main class="main">
+    <div id="calBar" class="cal-bar" hidden>
+      <div class="cal-bar-l">
+        <div id="calAccount" class="cal-account"></div>
+        <div id="calMeta" class="cal-meta"></div>
+      </div>
+      <select id="calRange" class="cal-range">
+        <option value="1">今日</option>
+        <option value="7">1週間</option>
+        <option value="14">2週間</option>
+        <option value="30">1ヶ月</option>
+        <option value="90">3ヶ月</option>
+      </select>
+      <button type="button" id="calRefresh" class="cal-refresh" aria-label="更新">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-1.6 5.3"/><path d="M20 5.5V11h-5.5"/></svg>
+      </button>
+    </div>
+    <ul id="todoList" class="todos"></ul>
+    <div id="emptyState" class="empty" hidden>
+      <p id="emptyText">右下の ＋ から追加してください</p>
+    </div>
+    <div class="list-bottom"></div>
+  </main>
+
+  <button type="button" id="fab" class="fab" aria-label="追加">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</div>
+
+<!-- 追加 -->
+<div id="addSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">ToDoを追加</div>
+    <input id="addInput" class="big-input" type="text" placeholder="やること" maxlength="500" autocomplete="off">
+    <div class="composer-meta">
+      <button type="button" id="btnColor" class="chip-btn"><span class="swatch" id="colorSwatch"></span><span>色</span></button>
+      <button type="button" id="btnDue" class="chip-btn"><span>⏰</span><span id="btnDueLabel">日時を入れる</span></button>
+      <button type="button" id="btnDueClear" class="chip-btn only-x" title="日時を消す" hidden>×</button>
+    </div>
+    <div id="gcalHint" class="composer-hint"></div>
+    <div class="sheet-btns">
+      <button type="button" id="addCancel" class="btn ghost">キャンセル</button>
+      <button type="button" id="addOk" class="btn primary">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- メニュー -->
+<div id="menuSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">メニュー</div>
+    <ul class="menu-list">
+      <li><button type="button" id="mTabAdd">＋　タブを追加</button></li>
+      <li><button type="button" id="mTabEdit">☰　タブの並べ替え・名前変更</button></li>
+      <li><button type="button" id="mClearDone">✓　完了したToDoを削除</button></li>
+      <li><button type="button" id="mSync">🔄　Googleカレンダーと同期</button></li>
+      <li><button type="button" id="mSettings">⚙️　設定</button></li>
+    </ul>
+    <div id="menuVer" class="menu-ver"></div>
+    <div class="sheet-btns">
+      <button type="button" class="btn ghost sheet-close">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- 色パレット -->
+<div id="colorSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">ToDoの色</div>
+    <div id="colorGrid" class="color-grid"></div>
+    <button type="button" class="btn ghost wide sheet-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 日付と時間 -->
+<div id="dueSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">日付と時間</div>
+    <div class="quick-row">
+      <button type="button" class="quick" data-day="0">今日</button>
+      <button type="button" class="quick" data-day="1">明日</button>
+      <button type="button" class="quick" data-day="2">明後日</button>
+      <button type="button" class="quick" data-day="7">来週</button>
+    </div>
+    <label class="field"><span>日付</span><input id="dueDate" type="date"></label>
+    <label class="field"><span>時間</span><input id="dueTime" type="time"><small>空欄なら終日の予定になります</small></label>
+    <div class="quick-row">
+      <button type="button" class="quick" data-time="09:00">9:00</button>
+      <button type="button" class="quick" data-time="12:00">12:00</button>
+      <button type="button" class="quick" data-time="18:00">18:00</button>
+      <button type="button" class="quick" data-time="21:00">21:00</button>
+    </div>
+    <label class="field"><span>繰り返し</span>
+      <select id="dueRepeat">
+        <option value="none">なし</option>
+        <option value="daily">毎日</option>
+        <option value="weekly">毎週（曜日指定）</option>
+        <option value="monthly">毎月（日付指定）</option>
+      </select>
+    </label>
+    <div id="weekdayRow" class="weekdays" hidden></div>
+    <label class="field" id="monthdayRow" hidden><span>毎月の日</span><input id="dueMonthday" type="number" min="1" max="31" value="1"></label>
+    <div id="dueGcalNote" class="due-note"></div>
+    <div class="sheet-btns">
+      <button type="button" id="dueClear" class="btn ghost">日時なし</button>
+      <button type="button" id="dueOk" class="btn primary">決定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ToDo編集 -->
+<div id="editSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">ToDoを編集</div>
+    <label class="field"><span>内容</span><textarea id="editText" rows="3" maxlength="500"></textarea></label>
+    <label class="field"><span>メモ</span><textarea id="editNote" rows="2" maxlength="2000" placeholder="任意"></textarea></label>
+    <div class="field"><span>色</span><div id="editColors" class="color-grid small"></div></div>
+    <label class="field"><span>タブを移動</span><select id="editTab"></select></label>
+    <div class="field"><span>日付と時間</span><button type="button" id="editDueBtn" class="btn ghost wide">日時なし</button></div>
+    <label class="check-line"><input id="editGcal" type="checkbox"><span>Googleカレンダーに登録する</span></label>
+    <div class="sheet-btns">
+      <button type="button" id="editDelete" class="btn danger">削除</button>
+      <button type="button" id="editCancel" class="btn ghost">キャンセル</button>
+      <button type="button" id="editSave" class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- タブ管理 -->
+<div id="tabSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title">タブ設定</div>
+    <ul id="tabEditList" class="tab-edit-list"></ul>
+    <div class="sheet-btns">
+      <button type="button" id="tabAdd" class="btn ghost">＋ タブを追加</button>
+      <button type="button" class="btn primary sheet-close">完了</button>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div id="settingsSheet" class="sheet" hidden>
+  <div class="sheet-inner tall">
+    <div class="sheet-title">設定</div>
+
+    <div class="sec">Googleカレンダー連携</div>
+    <div class="gcal-box">
+      <div id="gcalStatus" class="gcal-status">未接続</div>
+      <div class="sheet-btns tight">
+        <button type="button" id="gcalConnect" class="btn primary">接続する</button>
+        <button type="button" id="gcalDisconnect" class="btn ghost">切断</button>
+      </div>
+      <label class="field"><span>使うGoogleアカウント</span><input id="gcalAccount" type="email" placeholder="you@gmail.com"><small>接続するときにこのアカウントでログインしてください</small></label>
+      <label class="field"><span>書き込み先カレンダー</span><select id="gcalCalendar"></select></label>
+      <label class="check-line"><input id="gcalAuto" type="checkbox"><span>日時つきToDoを自動でカレンダーに送る</span></label>
+      <label class="check-line"><input id="gcalDeleteOnDone" type="checkbox"><span>完了したらカレンダーの予定も消す</span></label>
+      <label class="field"><span>取り込み範囲</span><select id="gcalImportRange">
+        <option value="0">取り込まない</option>
+        <option value="1">今日ぶん</option>
+        <option value="7">1週間先まで</option>
+        <option value="30">1ヶ月先まで</option>
+      </select><small>カレンダーの予定をToDoとして取り込みます</small></label>
+      <button type="button" id="gcalSyncNow" class="btn ghost wide">今すぐ同期</button>
+      <div id="gcalLog" class="gcal-log"></div>
+      <details class="adv">
+        <summary>接続設定（クライアントID）</summary>
+        <label class="field"><span>OAuth クライアントID</span><input id="gcalClientId" type="text" placeholder="xxxxx.apps.googleusercontent.com"></label>
+        <button type="button" id="gcalSaveId" class="btn ghost">保存</button>
+        <small>Google Cloud で作った「ウェブアプリケーション」のクライアントID。手順は README.md。</small>
+      </details>
+    </div>
+
+    <div class="sec">表示</div>
+    <div class="field"><span>テーマカラー</span><div id="themeGrid" class="theme-grid"></div></div>
+    <label class="field"><span>外観</span><select id="setDark"><option value="auto">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select></label>
+    <label class="field"><span>文字サイズ</span><select id="setFont"><option value="1">極小</option><option value="2">小</option><option value="3">標準</option><option value="4">大</option><option value="5">特大</option></select></label>
+    <label class="field"><span>表示行数</span><select id="setLines"><option value="1">1行</option><option value="2">2行</option><option value="3">3行</option><option value="0">全部表示</option></select></label>
+    <label class="check-line"><input id="setTabCount" type="checkbox"><span>タブに未完了の数を表示</span></label>
+    <label class="check-line"><input id="setBadge" type="checkbox"><span>アプリアイコンに未完了数を表示</span></label>
+    <label class="check-line"><input id="setShowMeta" type="checkbox"><span>リストに日時・繰り返しを表示する</span></label>
+
+    <div class="sec">動作</div>
+    <label class="check-line"><input id="setAutoReset" type="checkbox"><span>毎日チェックを自動リセット</span></label>
+    <label class="field"><span>リセット時刻</span><input id="setResetTime" type="time" value="04:00"></label>
+    <label class="check-line"><input id="setNotify" type="checkbox"><span>ブラウザ通知を出す（アプリを開いている間）</span></label>
+
+    <div class="sec">データ</div>
+    <div class="sheet-btns tight">
+      <button type="button" id="dataExport" class="btn ghost">書き出し(JSON)</button>
+      <button type="button" id="dataImport" class="btn ghost">読み込み</button>
+      <input id="dataFile" type="file" accept="application/json" hidden>
+    </div>
+    <button type="button" id="dataIcs" class="btn ghost wide">.ics で書き出す（手動インポート用）</button>
+    <button type="button" id="dataReset" class="btn danger wide">全データを削除</button>
+
+    <div class="sheet-btns">
+      <button type="button" class="btn primary sheet-close">閉じる</button>
+    </div>
+    <div class="ver" id="verLine"></div>
+  </div>
+</div>
+
+<!-- カレンダーの予定 -->
+<div id="evSheet" class="sheet" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-title" id="evTitle"></div>
+    <div id="evWhen" class="ev-when"></div>
+    <div id="evWhere" class="ev-where"></div>
+    <div class="sheet-btns">
+      <button type="button" id="evToTodo" class="btn ghost">ToDoに入れる</button>
+      <button type="button" id="evOpen" class="btn primary">カレンダーで開く</button>
+    </div>
+    <button type="button" class="btn ghost wide sheet-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 汎用の入力・確認ダイアログ -->
+<div id="askSheet" class="sheet" hidden>
+  <div class="sheet-inner narrow">
+    <div class="sheet-title" id="askTitle"></div>
+    <p class="ask-msg" id="askMsg"></p>
+    <input id="askInput" class="ask-input" type="text"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="ask-error" id="askError"></div>
+    <div class="sheet-btns">
+      <button type="button" id="askCancel" class="btn ghost">キャンセル</button>
+      <button type="button" id="askOk" class="btn primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="gcal.js?v=150"></script>
+<script src="app.js?v=150"></script>
+</body>
+</html>
