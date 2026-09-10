@@ -56,17 +56,18 @@ python -m http.server 8931 --directory "I:/_____Claude/apps/todolink"
 
 ---
 
-## 3. スマホで使う（ホーム画面アプリ化）
+## 3. スマホで使う（公開済み）
 
-Googleログインを使う都合上、**https のURLが必要**です。無料で置ける先を1つ選びます。
+**公開URL（永久に変わりません）**
 
-### おすすめ：Netlify Drop（アカウント登録なしで即公開）
-1. https://app.netlify.com/drop を開く
-2. `I:\_____Claude\apps\todolink` フォルダをそのままドラッグ＆ドロップ
-3. `https://xxxx.netlify.app` というURLが出る → これをスマホで開く
+```
+https://morishita8268-blip.github.io/todolink/
+```
 
-### 代替：Vercel / GitHub Pages / Cloudflare Pages
-どれでも可。**静的ファイルを置くだけ**でビルド不要です。
+GitHub Pages に置いてあります。PCが消えていても、どのWi-Fiでも、4Gでも開きます。
+
+- リポジトリ: https://github.com/morishita8268-blip/todolink
+- 更新のしかた: このフォルダを編集 → `git add -A && git commit -m "..." && git push` → 数分でURLに反映
 
 ### ホーム画面に追加
 - **iPhone**：Safariで開く → 共有ボタン → 「ホーム画面に追加」
@@ -74,8 +75,8 @@ Googleログインを使う都合上、**https のURLが必要**です。無料�
 
 これでアドレスバーのない普通のアプリとして起動します。
 
-> URL自体は知っている人しか開けませんが、リンクを知られたくない場合は Netlify/Vercel の
-> パスワード保護、またはアプリ内の「パスコード」を設定してください。
+> リポジトリは公開ですが、**ToDoの中身は端末のブラウザにしかない**ので、
+> URLを知られてもデータは見られません。
 
 ---
 
@@ -96,7 +97,7 @@ Googleログインを使う都合上、**https のURLが必要**です。無料�
    - アプリケーションの種類: **ウェブ アプリケーション**
    - **承認済みの JavaScript 生成元** に、使うURLを全部追加：
      - `http://localhost:8931` （PCで動かす用）
-     - `https://xxxx.netlify.app` （3で取得したURL。パスは付けない）
+     - `https://morishita8268-blip.github.io` （**パスは付けない**。`/todolink/` は書かない）
    - 作成 → 表示される **クライアントID**（`....apps.googleusercontent.com`）をコピー
 
 ### 4-2. 使うGoogleアカウント
@@ -177,7 +178,7 @@ apps/todolink/
 ├── app.css                   見た目（テーマ色・ダークモード）
 ├── app.js                    本体（ToDo・タブ・設定・同期の制御）
 ├── gcal.js                   Googleカレンダー連携（認証とAPI呼び出し）
-├── sw.js                     オフライン動作
+├── sw.js                     旧キャッシュを消すだけの空ワーカー
 ├── manifest.webmanifest      ホーム画面アプリ化の設定
 ├── icons/                    アプリアイコン
 └── README.md                 この文書
@@ -191,11 +192,11 @@ apps/todolink/
 
 | 症状 | 対処 |
 |---|---|
-| 「接続する」で何も起きない | クライアントIDの **承認済みJavaScript生成元** に、今開いているURL（`https://xxx.netlify.app` など、パスなし）が入っているか確認 |
+| 「接続する」で何も起きない | クライアントIDの **承認済みJavaScript生成元** に `https://morishita8268-blip.github.io` が入っているか確認（パスなし） |
 | `redirect_uri_mismatch` / `origin_mismatch` | 同上。`http` と `https`、末尾スラッシュの有無も一致させる |
 | `access_denied` | OAuth同意画面の **テストユーザー** に自分のGmailを追加したか確認 |
 | 同期はできるが通知が来ない | スマホのGoogleカレンダーアプリ側の通知設定を確認 |
-| 更新したのに古い画面が出る | ホーム画面アプリを一度閉じて開き直す（サービスワーカーのキャッシュ） |
+| 更新したのに古い画面が出る | ホーム画面アプリを一度閉じて開き直す。それでもダメなら index.html の `?v=` 番号を上げてpush |
 | データが消えた | 設定 → データ → 読み込み で、書き出しておいたJSONを復元 |
 
 ---
