@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.6.0';
+  var VERSION = '1.7.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
 
@@ -1405,6 +1405,8 @@
     $('setResetTime').value = st.resetTime || '04:00';
     $('setNotify').checked = !!st.notify;
     $('gcalClientId').value = st.gcal.clientId || '';
+    // クライアントID未設定なら折りたたみを開いておく（入力欄が隠れていて気づけない事故を防ぐ）
+    if ($('gcalAdv')) $('gcalAdv').open = !st.gcal.clientId;
     $('gcalAccount').value = st.gcal.account || '';
     $('gcalAuto').checked = !!st.gcal.auto;
     $('gcalDeleteOnDone').checked = !!st.gcal.deleteOnDone;

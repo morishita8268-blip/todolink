@@ -313,7 +313,11 @@ ul{margin:0;padding:0;list-style:none}
 .tab-edit-list .mini.del{color:var(--danger)}
 
 .gcal-box{background:var(--pill);border-radius:12px;padding:14px}
-.gcal-status{font-size:.82rem;color:var(--ink-2);padding:8px 10px;background:var(--card);border-radius:9px}
+.gcal-status{
+  font-size:.82rem;color:var(--ink-2);padding:8px 10px;
+  background:transparent;border-radius:9px;border:1px dashed var(--line);
+  user-select:none;cursor:default;
+}
 .gcal-status.ok{color:#0f7a45}
 .gcal-log{font-size:.72rem;color:var(--ink-3);margin-top:10px;white-space:pre-wrap;line-height:1.6;max-height:120px;overflow-y:auto}
 .adv{margin-top:14px;font-size:.8rem;color:var(--ink-2)}

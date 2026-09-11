@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=160">
+<link rel="stylesheet" href="app.css?v=170">
 <title>ToDoリンク</title>
 <script>
 /* 自己修復ブート — 外部ファイルより先に、ここだけで完結して動く必要がある。
@@ -233,7 +233,7 @@
       </select><small>カレンダーの予定をToDoとして取り込みます</small></label>
       <button type="button" id="gcalSyncNow" class="btn ghost wide">今すぐ同期</button>
       <div id="gcalLog" class="gcal-log"></div>
-      <details class="adv">
+      <details class="adv" id="gcalAdv">
         <summary>接続設定（クライアントID）</summary>
         <label class="field"><span>OAuth クライアントID</span><input id="gcalClientId" type="text" placeholder="xxxxx.apps.googleusercontent.com"></label>
         <button type="button" id="gcalSaveId" class="btn ghost">保存</button>
@@ -302,7 +302,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="gcal.js?v=160"></script>
-<script src="app.js?v=160"></script>
+<script src="gcal.js?v=170"></script>
+<script src="app.js?v=170"></script>
 </body>
 </html>
