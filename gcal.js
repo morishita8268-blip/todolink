@@ -178,6 +178,11 @@
   var GCal = {
     PRIVATE_KEY: PRIVATE_KEY,
 
+    /** Googleのライブラリを先に読み込んでおく。
+     *  iOS Safari はボタン押下から時間が空くとポップアップを塞ぐので、
+     *  接続ボタンを押した瞬間に同期的に認証を開始できる状態にしておく必要がある。 */
+    preload: function () { return loadGis().catch(function () {}); },
+
     setClientId: function (id) {
       if (id !== state.clientId) { state.tokenClient = null; }
       state.clientId = (id || '').trim();

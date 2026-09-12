@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.7.0';
+  var VERSION = '1.7.1';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
 
@@ -1303,6 +1303,7 @@
       var id = $('gcalClientId').value.trim();
       S.settings.gcal.clientId = id; save(true);
       GCal.setClientId(id);
+      if (id && GCal.preload) GCal.preload();
       gstatus(); toast(id ? 'クライアントIDを保存しました' : 'クライアントIDを消しました');
     };
     $('gcalConnect').onclick = function () {
@@ -1329,7 +1330,14 @@
         gstatus(); toast('Googleカレンダーに接続しました');
         S.calCache.at = 0;
         return syncEverything(true);
-      }).catch(function (e) { toast('接続失敗：' + e.message); glog('接続失敗: ' + e.message); });
+      }).catch(function (e) {
+        var m = e.message || '';
+        if (/popup|closed|cancel|blocked/i.test(m)) {
+          m = 'ポップアップが開けませんでした。ホーム画面のアプリではなく、Safariで開いて試してください。';
+        }
+        toast('接続失敗：' + m);
+        glog('接続失敗: ' + (e.message || m));
+      });
     };
     $('gcalAccount').onchange = function () { S.settings.gcal.account = this.value.trim(); save(true); };
     $('gcalDisconnect').onclick = function () {
@@ -1436,6 +1444,9 @@
     wireSheetDismiss();
     bind();
     GCal.setClientId(S.settings.gcal.clientId || '');
+    // 認証ライブラリを先に読み込む。iOS Safari はボタン押下から時間が空くと
+    // ポップアップを塞ぐため、押した瞬間に認証を始められる状態にしておく。
+    if (GCal.preload) GCal.preload();
 
     if (!S.lastRealTabId || !tabsById(S.lastRealTabId)) {
       S.lastRealTabId = (S.activeTabId !== GCAL_TAB && tabsById(S.activeTabId)) ? S.activeTabId : S.tabs[0].id;
