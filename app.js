@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.8.0';
+  var VERSION = '1.9.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
 
@@ -36,8 +36,8 @@
         notify: false,
         gcal: {
           clientId: '', calendarId: '', calendarName: '', account: '',
-          auto: true, deleteOnDone: false, importDays: 0, lastSync: '',
-          viewDays: 14
+          auto: false, deleteOnDone: false, importDays: 0, lastSync: '',
+          viewDays: 14, viewCals: []
         }
       },
       calCache: { events: [], at: 0 }
@@ -56,6 +56,11 @@
       if (!Array.isArray(s.tabs) || !s.tabs.length) { s.tabs = d.tabs; s.activeTabId = d.activeTabId; }
       if (!Array.isArray(s.todos)) s.todos = [];
       if (!s.calCache || !Array.isArray(s.calCache.events)) s.calCache = { events: [], at: 0 };
+      // 「勝手にカレンダーへ送らない」方針に一度だけ寄せる（以降は本人の設定を尊重）
+      if (!s.settings.autoOffMigrated) {
+        s.settings.gcal.auto = false;
+        s.settings.autoOffMigrated = true;
+      }
       return s;
     } catch (e) { return defaults(); }
   }
@@ -305,6 +310,7 @@
   }
 
   var viewingEvent = null;
+  var allCals = [];   // 接続後に取得したカレンダー一覧（設定のチェックボックス用）
   function openEvent(e) {
     viewingEvent = e;
     $('evTitle').textContent = e.title;
@@ -327,8 +333,14 @@
     var btn = $('calRefresh');
     btn.classList.add('spin');
     return GCal.listCalendars(true).then(function (cals) {
-      var use = cals.filter(function (c) { return c.selected; });
-      return GCal.listUpcomingMulti(use.length ? use : cals, Number(g.viewDays) || 14);
+      allCals = cals;
+      // 既定は「自分のカレンダー（メイン）」だけ。設定で足せる。
+      var pick = (g.viewCals && g.viewCals.length)
+        ? cals.filter(function (c) { return g.viewCals.indexOf(c.id) >= 0; })
+        : cals.filter(function (c) { return c.primary; });
+      if (!pick.length) pick = cals.filter(function (c) { return c.primary; });
+      if (!pick.length) pick = cals.slice(0, 1);
+      return GCal.listUpcomingMulti(pick, Number(g.viewDays) || 14);
     }).then(function (evs) {
       S.calCache = { events: evs, at: Date.now() };
       save(true);
@@ -465,6 +477,7 @@
     S.todos.push(t);
     clearPendingDue();
     save(); renderTabs(); renderList();
+    // 自動では送らない。各行の右の📅ボタンで選んだものだけカレンダーに入れる。
     if (t.dueDate && S.settings.gcal.auto && GCal.isConnected() && S.settings.gcal.calendarId) pushOne(t);
   }
 
@@ -712,36 +725,48 @@
     pendingDue = { dueDate: '', dueTime: '', repeat: { type: 'none' } };
     showDuePreview();
   }
+  /** 「今日」「明日」を1タップで入れる */
+  function setQuickDay(offset) {
+    var want = ymd(new Date(Date.now() + offset * 86400000));
+    if (pendingDue.dueDate === want && !pendingDue.dueTime) {
+      clearPendingDue();          // もう一度押したら解除
+    } else {
+      pendingDue = { dueDate: want, dueTime: '', repeat: { type: 'none' } };
+      showDuePreview();
+    }
+  }
+
   function showDuePreview() {
     var btn = $('btnDue'), label = $('btnDueLabel'), x = $('btnDueClear');
     if (!pendingDue.dueDate) {
-      label.textContent = '日時を入れる';
-      btn.classList.remove('set');
+      label.textContent = '期限・通知';
+      btn.classList.remove('on');
       x.hidden = true;
     } else {
       label.textContent = dueLabel(pendingDue) + (repeatLabel(pendingDue.repeat) ? ' ' + repeatLabel(pendingDue.repeat) : '');
-      btn.classList.add('set');
+      btn.classList.add('on');
       x.hidden = false;
     }
+    // 今日／明日チップの点灯
+    [['qaToday', 0], ['qaTomorrow', 1]].forEach(function (p) {
+      var want = ymd(new Date(Date.now() + p[1] * 86400000));
+      var on = pendingDue.dueDate === want;
+      if ($(p[0])) $(p[0]).classList.toggle('on', on);
+    });
     updateGcalHint();
   }
   /** 「カレンダーに入るのか」を追加画面で常に見せる */
   function updateGcalHint() {
     var el = $('gcalHint');
     var g = S.settings.gcal;
-    if (!pendingDue.dueDate) {
-      el.textContent = '日時を入れるとGoogleカレンダーにも登録できます';
-      el.className = 'composer-hint';
-      return;
-    }
     if (GCal.isConnected() && g.calendarId && g.auto) {
-      el.textContent = '📅 ' + (g.calendarName || 'カレンダー') + 'に追加されます';
+      el.textContent = '📅 自動でカレンダーに追加されます';
       el.className = 'composer-hint on';
     } else if (GCal.isConnected() && g.calendarId) {
-      el.textContent = '📅 自動追加はオフです（ToDoの編集画面から個別に送れます）';
+      el.textContent = 'カレンダーに入れたいものは、追加後に右の📅を押す';
       el.className = 'composer-hint';
     } else {
-      el.textContent = '📅 未接続です（設定 → Googleカレンダー連携）';
+      el.textContent = '';
       el.className = 'composer-hint';
     }
   }
@@ -816,6 +841,28 @@
   }
 
   /* 追加シート */
+  /** 色の丸を並べる。押した瞬間に選択が決まる（別画面を挟まない） */
+  function renderQuickColors() {
+    var el = $('qaColors');
+    el.innerHTML = '';
+    TODO_COLORS.forEach(function (c, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.style.background = c;
+      b.setAttribute('aria-label', '色' + (i + 1));
+      if (composeColor === i) b.className = 'on';
+      b.onclick = function () { composeColor = i; renderQuickColors(); };
+      el.appendChild(b);
+    });
+  }
+  /** 追加ボタンの見た目。文字が無ければ「閉じる」 */
+  function refreshAddBtn() {
+    var has = !!$('addInput').value.trim();
+    var b = $('addOk');
+    b.textContent = has ? '追加' : '閉じる';
+    b.className = 'qa-go' + (has ? ' ready' : '');
+  }
+
   function openAdd() {
     if (searching) closeSearch();
     if (isCalTab()) {
@@ -825,15 +872,20 @@
     }
     $('addInput').value = '';
     clearPendingDue();
-    $('colorSwatch').style.background = TODO_COLORS[composeColor];
+    renderQuickColors();
+    refreshAddBtn();
     openSheet('addSheet');
     setTimeout(function () { $('addInput').focus(); }, 80);
   }
+  /** 追加しても閉じない。続けて打てるようにする（元アプリと同じ挙動） */
   function submitAdd() {
     var v = $('addInput').value.trim();
-    if (!v) { toast('内容を入力してください'); return; }
+    if (!v) { closeSheet('addSheet'); return; }
     addTodo(v);
-    closeSheet('addSheet');
+    $('addInput').value = '';
+    clearPendingDue();
+    refreshAddBtn();
+    setTimeout(function () { $('addInput').focus(); }, 0);
   }
 
   /* 編集シート */
@@ -1230,21 +1282,13 @@
     // 追加
     $('fab').onclick = openAdd;
     $('addOk').onclick = submitAdd;
-    $('addCancel').onclick = function () { closeSheet('addSheet'); };
+    $('addInput').addEventListener('input', refreshAddBtn);
+    $('qaToday').onclick = function () { setQuickDay(0); };
+    $('qaTomorrow').onclick = function () { setQuickDay(1); };
     $('addInput').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); submitAdd(); }
     });
 
-    // 色
-    $('btnColor').onclick = function () {
-      buildColorGrid($('colorGrid'), function () { return composeColor; }, function (i) {
-        composeColor = i;
-        $('colorSwatch').style.background = TODO_COLORS[i];
-        closeSheet('colorSheet');
-      });
-      openSheet('colorSheet');
-    };
-    $('colorSwatch').style.background = TODO_COLORS[composeColor];
 
     // 日付と時間
     $('btnDue').onclick = function () { openDue('compose', pendingDue); };
@@ -1459,6 +1503,7 @@
       g.appendChild(b);
     });
 
+    renderCalPicker();
     gstatus();
     if (GCal.isConnected() && !$('gcalCalendar').options.length) {
       loadCalendars().then(gstatus).catch(function (e) { glog('カレンダー一覧取得失敗: ' + e.message); });
@@ -1476,6 +1521,39 @@
       if (now - lastTouch < 350) e.preventDefault();   // ダブルタップ拡大
       lastTouch = now;
     }, { passive: false });
+  }
+
+  /** 📅カレンダータブに出すカレンダーを選ぶ（既定は自分のメインだけ） */
+  function renderCalPicker() {
+    var box = $('gcalCalList');
+    if (!box) return;
+    var g = S.settings.gcal;
+    if (!allCals.length) {
+      box.innerHTML = '<small>接続すると、ここに表示するカレンダーを選べます</small>';
+      return;
+    }
+    box.innerHTML = '';
+    allCals.forEach(function (c) {
+      var on = (g.viewCals && g.viewCals.length) ? g.viewCals.indexOf(c.id) >= 0 : !!c.primary;
+      var lab = document.createElement('label');
+      lab.className = 'check-line';
+      lab.innerHTML = '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+        '<span><i class="cdot" style="background:' + esc(c.color || '#888') + '"></i>' +
+        esc(c.name) + (c.primary ? '（自分）' : '') + '</span>';
+      lab.querySelector('input').onchange = function () {
+        var cur = (g.viewCals && g.viewCals.length)
+          ? g.viewCals.slice()
+          : allCals.filter(function (x) { return x.primary; }).map(function (x) { return x.id; });
+        var i = cur.indexOf(c.id);
+        if (this.checked) { if (i < 0) cur.push(c.id); }
+        else if (i >= 0) { cur.splice(i, 1); }
+        g.viewCals = cur;
+        save(true);
+        S.calCache.at = 0;
+        loadCalView(true);
+      };
+      box.appendChild(lab);
+    });
   }
 
   function start() {

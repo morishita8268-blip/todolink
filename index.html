@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=180">
+<link rel="stylesheet" href="app.css?v=190">
 <title>ToDoリンク</title>
 <script>
 /* 自己修復ブート — 外部ファイルより先に、ここだけで完結して動く必要がある。
@@ -98,20 +98,21 @@
   </button>
 </div>
 
-<!-- 追加 -->
-<div id="addSheet" class="sheet" hidden>
-  <div class="sheet-inner">
-    <div class="sheet-title">ToDoを追加</div>
-    <input id="addInput" class="big-input" type="text" placeholder="やること" maxlength="500" autocomplete="off">
-    <div class="composer-meta">
-      <button type="button" id="btnColor" class="chip-btn"><span class="swatch" id="colorSwatch"></span><span>色</span></button>
-      <button type="button" id="btnDue" class="chip-btn"><span>⏰</span><span id="btnDueLabel">日時を入れる</span></button>
-      <button type="button" id="btnDueClear" class="chip-btn only-x" title="日時を消す" hidden>×</button>
+<!-- 追加（キーボードの上に出る1枚のパネル。階層を作らない） -->
+<div id="addSheet" class="sheet quick-add" hidden>
+  <div class="sheet-inner qa">
+    <input id="addInput" class="qa-input" type="text" placeholder="やること" maxlength="500"
+           autocomplete="off" autocapitalize="off" autocorrect="off">
+    <div id="qaColors" class="qa-colors"></div>
+    <div class="qa-chips">
+      <button type="button" id="btnDue" class="qa-chip"><span id="btnDueLabel">期限・通知</span></button>
+      <button type="button" id="qaToday" class="qa-chip">今日</button>
+      <button type="button" id="qaTomorrow" class="qa-chip">明日</button>
+      <button type="button" id="btnDueClear" class="qa-chip x" hidden>×</button>
     </div>
-    <div id="gcalHint" class="composer-hint"></div>
-    <div class="sheet-btns">
-      <button type="button" id="addCancel" class="btn ghost">キャンセル</button>
-      <button type="button" id="addOk" class="btn primary">追加</button>
+    <div class="qa-foot">
+      <span id="gcalHint" class="composer-hint"></span>
+      <button type="button" id="addOk" class="qa-go">閉じる</button>
     </div>
   </div>
 </div>
@@ -222,7 +223,11 @@
         <button type="button" id="gcalDisconnect" class="btn ghost">切断</button>
       </div>
       <label class="field"><span>使うGoogleアカウント</span><input id="gcalAccount" type="email" placeholder="you@gmail.com"><small>接続するときにこのアカウントでログインしてください</small></label>
-      <label class="field"><span>書き込み先カレンダー</span><select id="gcalCalendar"></select></label>
+      <label class="field"><span>書き込み先カレンダー</span><select id="gcalCalendar"></select><small>ToDoを送るときの行き先</small></label>
+      <div class="field"><span>📅タブに表示するカレンダー</span>
+        <div id="gcalCalList" class="cal-list"></div>
+        <small>既定は自分のカレンダーだけ。会社や祝日も見たいときはチェックを足す</small>
+      </div>
       <label class="check-line"><input id="gcalAuto" type="checkbox"><span>日時つきToDoを自動でカレンダーに送る</span></label>
       <label class="check-line"><input id="gcalDeleteOnDone" type="checkbox"><span>完了したらカレンダーの予定も消す</span></label>
       <label class="field"><span>取り込み範囲</span><select id="gcalImportRange">
@@ -302,7 +307,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="gcal.js?v=180"></script>
-<script src="app.js?v=180"></script>
+<script src="gcal.js?v=190"></script>
+<script src="app.js?v=190"></script>
 </body>
 </html>
