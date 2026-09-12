@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.7.1';
+  var VERSION = '1.8.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
 
@@ -1012,6 +1012,7 @@
     t.textContent =
       state === 'busy' ? '同期中…' :
       state === 'ok' ? syncAgo() :
+      state === 'auth' ? 'タップして再接続' :
       state === 'err' ? '同期できません' :
       'カレンダー未接続';
   }
@@ -1021,11 +1022,24 @@
   }
 
   /** 送信（ToDo→カレンダー）と取得（カレンダー→アプリ）をまとめて1回 */
+  /** アクセス権の期限切れが近ければ、画面を出さずに更新を試みる */
+  function keepAlive() {
+    if (!GCal.isConnected() || !GCal.refresh) return Promise.resolve();
+    if (GCal.expiresIn() > 600000) return Promise.resolve();   // 残り10分を切ったら
+    return GCal.refresh().catch(function () { /* 失敗しても次の同期でauth表示になる */ });
+  }
+
   function syncEverything(manual) {
     if (syncing) return Promise.resolve();
-    if (!GCal.hasClientId() || !GCal.isConnected()) {
+    if (!GCal.hasClientId()) {
       setSyncUI('off');
       if (manual) toast('設定 → Googleカレンダー連携 でつないでください');
+      return Promise.resolve();
+    }
+    if (!GCal.isConnected()) {
+      // クライアントIDはあるのに権限切れ＝1タップで戻れる状態
+      setSyncUI(S.settings.gcal.calendarId ? 'auth' : 'off');
+      if (manual) toast('Googleのアクセス権が切れています。左上をタップして再接続してください');
       return Promise.resolve();
     }
     if (!manual && lastSyncAt && Date.now() - lastSyncAt < MIN_GAP_MS) return Promise.resolve();
@@ -1034,12 +1048,14 @@
     syncErrors = 0;
     syncIsManual = !!manual;
     setSyncUI('busy');
-    return syncAll(manual)
+    return keepAlive().then(function () { return syncAll(manual); })
       .then(function () { return loadCalView(true); })
       .catch(function (e) { syncErrors++; glog('同期エラー: ' + e.message); })
       .then(function () {
         syncing = false;
-        if (syncErrors) {
+        if (!GCal.isConnected()) {
+          setSyncUI('auth');
+        } else if (syncErrors) {
           setSyncUI('err');
         } else {
           lastSyncAt = Date.now();
@@ -1154,7 +1170,19 @@
   function bind() {
     // ヘッダー
     $('syncState').onclick = function () {
-      if (!GCal.hasClientId() || !GCal.isConnected()) { fillSettings(); openSheet('settingsSheet'); return; }
+      if (!GCal.hasClientId()) { fillSettings(); openSheet('settingsSheet'); return; }
+      if (!GCal.isConnected()) {
+        // 押した瞬間に認証を始める。ここで待たせるとiOSがポップアップを塞ぐ。
+        setSyncUI('busy');
+        GCal.connect()
+          .then(function () { glog('再接続しました'); gstatus(); return syncEverything(true); })
+          .catch(function (e) {
+            setSyncUI('auth');
+            toast('再接続できませんでした：' + (e.message || ''));
+            glog('再接続失敗: ' + (e.message || ''));
+          });
+        return;
+      }
       syncEverything(true);
     };
     $('btnMenu').onclick = function () {
@@ -1437,8 +1465,22 @@
     }
   }
 
+  /** iOS Safari は user-scalable=no を無視するので、拡大ジェスチャ自体を止める */
+  function blockZoomGestures() {
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
+      document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+    });
+    var lastTouch = 0;
+    document.addEventListener('touchend', function (e) {
+      var now = Date.now();
+      if (now - lastTouch < 350) e.preventDefault();   // ダブルタップ拡大
+      lastTouch = now;
+    }, { passive: false });
+  }
+
   function start() {
     S = load();
+    blockZoomGestures();
     watchViewport();
     applyLook();
     wireSheetDismiss();

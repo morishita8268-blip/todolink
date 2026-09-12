@@ -183,6 +183,14 @@
      *  接続ボタンを押した瞬間に同期的に認証を開始できる状態にしておく必要がある。 */
     preload: function () { return loadGis().catch(function () {}); },
 
+    /** アクセス権が切れるまでの残りミリ秒。未接続なら0 */
+    expiresIn: function () {
+      var t = state.token || loadStoredToken();
+      return t ? Math.max(0, t.exp - Date.now()) : 0;
+    },
+    /** 画面を出さずに更新を試みる（iOSでは失敗することがある） */
+    refresh: function () { return getToken(false); },
+
     setClientId: function (id) {
       if (id !== state.clientId) { state.tokenClient = null; }
       state.clientId = (id || '').trim();

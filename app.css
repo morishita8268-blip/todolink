@@ -46,6 +46,12 @@ body{
   overscroll-behavior-y:none;
 }
 button,input,select,textarea{font:inherit;color:inherit}
+/* iOSは文字が16px未満の入力欄をタップすると勝手に画面を拡大する。
+   16pxを下回らせないことでそれを止める。 */
+input,select,textarea{font-size:16px}
+/* ダブルタップによる拡大を無効にする（ボタン連打で拡大されるのを防ぐ） */
+html{touch-action:manipulation;-webkit-text-size-adjust:100%}
+button,.tab,.todo,.ev,.quick,.chip-btn{touch-action:manipulation}
 ul{margin:0;padding:0;list-style:none}
 
 /* ---------- layout ---------- */
