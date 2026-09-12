@@ -2,9 +2,10 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.9.0';
+  var VERSION = '1.10.0';
   var KEY = 'todolink.state.v1';
-  var GCAL_TAB = '__gcal__';   // Googleカレンダー専用の仮想タブ
+  var GCAL_TAB = '__gcal__';   // 自分のカレンダー（仮想タブ）
+  var TEAM_TAB = '__team__';   // みんなのカレンダー（仮想タブ）
 
   var TODO_COLORS = ['#9aa0aa', '#e2445c', '#f5a524', '#22a06b', '#3f96f3', '#8b5cf6', '#ec4899', '#0d9488'];
   var THEME_COLORS = [
@@ -40,7 +41,8 @@
           viewDays: 14, viewCals: []
         }
       },
-      calCache: { events: [], at: 0 }
+      calCache: { events: [], at: 0 },
+      teamCache: { events: [], at: 0 }
     };
   }
   function load() {
@@ -56,6 +58,7 @@
       if (!Array.isArray(s.tabs) || !s.tabs.length) { s.tabs = d.tabs; s.activeTabId = d.activeTabId; }
       if (!Array.isArray(s.todos)) s.todos = [];
       if (!s.calCache || !Array.isArray(s.calCache.events)) s.calCache = { events: [], at: 0 };
+      if (!s.teamCache || !Array.isArray(s.teamCache.events)) s.teamCache = { events: [], at: 0 };
       // 「勝手にカレンダーへ送らない」方針に一度だけ寄せる（以降は本人の設定を尊重）
       if (!s.settings.autoOffMigrated) {
         s.settings.gcal.auto = false;
@@ -88,7 +91,11 @@
   }
 
   function tabsById(id) { return S.tabs.filter(function (t) { return t.id === id; })[0]; }
-  function isCalTab() { return S.activeTabId === GCAL_TAB; }
+  function isCalTab() { return S.activeTabId === GCAL_TAB || S.activeTabId === TEAM_TAB; }
+  function isTeamTab() { return S.activeTabId === TEAM_TAB; }
+  /** いま見ているカレンダービューの種類 */
+  function calMode() { return S.activeTabId === TEAM_TAB ? 'team' : 'mine'; }
+  function calCacheOf(mode) { return mode === 'team' ? S.teamCache : S.calCache; }
   /** カレンダータブのときは「実在するタブ」を返す（追加先などに使う） */
   function activeTab() {
     if (isCalTab()) return tabsById(S.lastRealTabId) || S.tabs[0];
@@ -231,9 +238,24 @@
       S.activeTabId = GCAL_TAB;
       save(); renderTabs(); renderList();
       document.querySelector('.main').scrollTop = 0;
-      loadCalView(false);
+      loadCalView(false, 'mine');
     };
     bar.appendChild(cal);
+
+    // みんなのカレンダー（アクセスできる全カレンダー）
+    var team = document.createElement('button');
+    team.type = 'button';
+    team.className = 'tab cal team' + (S.activeTabId === TEAM_TAB && !searching ? ' active' : '');
+    team.innerHTML = '👥 みんな' +
+      (S.settings.showTabCount && S.teamCache.events.length ? '<span class="n">' + S.teamCache.events.length + '</span>' : '');
+    team.onclick = function () {
+      if (searching) closeSearch();
+      S.activeTabId = TEAM_TAB;
+      save(); renderTabs(); renderList();
+      document.querySelector('.main').scrollTop = 0;
+      loadCalView(false, 'team');
+    };
+    bar.appendChild(team);
 
     var add = document.createElement('button');
     add.className = 'tab-add'; add.type = 'button'; add.textContent = '＋';
@@ -254,15 +276,22 @@
 
   /* ---------------- Googleカレンダー ビュー ---------------- */
   function renderCalList() {
+    var mode = calMode();
+    var cache = calCacheOf(mode);
     $('calBar').hidden = false;
     var g = S.settings.gcal;
-    $('calAccount').textContent = g.account ? g.account + ' の予定' : 'Googleカレンダーの予定';
+    $('calAccount').textContent = mode === 'team'
+      ? 'みんなの予定'
+      : (g.account ? g.account + ' の予定' : '自分の予定');
     $('calRange').value = String(g.viewDays || 14);
 
-    var evs = S.calCache.events || [];
-    var when = S.calCache.at ? new Date(S.calCache.at).toTimeString().slice(0, 5) + ' 更新' : '未取得';
+    var evs = cache.events || [];
+    var when = cache.at ? new Date(cache.at).toTimeString().slice(0, 5) + ' 更新' : '未取得';
+    var calCount = mode === 'team'
+      ? (new Set(evs.map(function (e) { return e.calendarId; }))).size
+      : 0;
     $('calMeta').textContent = GCal.isConnected()
-      ? evs.length + '件 ・ ' + when
+      ? evs.length + '件' + (calCount ? ' ・ ' + calCount + '本のカレンダー' : '') + ' ・ ' + when
       : '未接続 — 設定 → Googleカレンダー連携 でつないでください';
 
     var list = $('todoList');
@@ -324,25 +353,35 @@
     openSheet('evSheet');
   }
 
-  function loadCalView(force) {
+  /** mode: 'mine'（自分のカレンダーだけ）/ 'team'（アクセスできる全部） */
+  function loadCalView(force, mode) {
+    mode = mode || calMode();
     var g = S.settings.gcal;
+    var cache = calCacheOf(mode);
     if (!GCal.isConnected()) { if (isCalTab()) renderCalList(); return Promise.resolve(); }
-    var fresh = S.calCache.at && (Date.now() - S.calCache.at < 120000);
+    var fresh = cache.at && (Date.now() - cache.at < 120000);
     if (fresh && !force) { if (isCalTab()) renderCalList(); return Promise.resolve(); }
 
     var btn = $('calRefresh');
     btn.classList.add('spin');
     return GCal.listCalendars(true).then(function (cals) {
       allCals = cals;
-      // 既定は「自分のカレンダー（メイン）」だけ。設定で足せる。
-      var pick = (g.viewCals && g.viewCals.length)
-        ? cals.filter(function (c) { return g.viewCals.indexOf(c.id) >= 0; })
-        : cals.filter(function (c) { return c.primary; });
-      if (!pick.length) pick = cals.filter(function (c) { return c.primary; });
-      if (!pick.length) pick = cals.slice(0, 1);
+      var pick;
+      if (mode === 'team') {
+        // みんな＝読めるカレンダー全部（会社・共有・他の人のもの）
+        pick = cals.slice();
+      } else {
+        // 自分＝既定はメインだけ。設定で足せる。
+        pick = (g.viewCals && g.viewCals.length)
+          ? cals.filter(function (c) { return g.viewCals.indexOf(c.id) >= 0; })
+          : cals.filter(function (c) { return c.primary; });
+        if (!pick.length) pick = cals.filter(function (c) { return c.primary; });
+        if (!pick.length) pick = cals.slice(0, 1);
+      }
       return GCal.listUpcomingMulti(pick, Number(g.viewDays) || 14);
     }).then(function (evs) {
-      S.calCache = { events: evs, at: Date.now() };
+      var next = { events: evs, at: Date.now() };
+      if (mode === 'team') S.teamCache = next; else S.calCache = next;
       save(true);
       renderTabs();
       if (isCalTab()) renderCalList();
@@ -1101,7 +1140,8 @@
     syncIsManual = !!manual;
     setSyncUI('busy');
     return keepAlive().then(function () { return syncAll(manual); })
-      .then(function () { return loadCalView(true); })
+      .then(function () { return loadCalView(true, 'mine'); })
+      .then(function () { return loadCalView(true, 'team'); })
       .catch(function (e) { syncErrors++; glog('同期エラー: ' + e.message); })
       .then(function () {
         syncing = false;
@@ -1249,8 +1289,8 @@
     // カレンダービュー
     $('calRange').onchange = function () {
       S.settings.gcal.viewDays = Number(this.value) || 14;
-      S.calCache.at = 0;
-      save(); loadCalView(true);
+      S.calCache.at = 0; S.teamCache.at = 0;
+      save(); loadCalView(true, calMode());
     };
     $('calRefresh').onclick = function () { syncEverything(true); };
     $('evOpen').onclick = function () {
@@ -1400,7 +1440,7 @@
         return loadCalendars();
       }).then(function () {
         gstatus(); toast('Googleカレンダーに接続しました');
-        S.calCache.at = 0;
+        S.calCache.at = 0; S.teamCache.at = 0;
         return syncEverything(true);
       }).catch(function (e) {
         var m = e.message || '';
@@ -1550,7 +1590,7 @@
         g.viewCals = cur;
         save(true);
         S.calCache.at = 0;
-        loadCalView(true);
+        loadCalView(true, 'mine');
       };
       box.appendChild(lab);
     });
