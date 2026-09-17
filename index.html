@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=1100">
+<link rel="stylesheet" href="app.css?v=2000">
 <title>ToDoリンク</title>
 <script>
 /* 自己修復ブート — 外部ファイルより先に、ここだけで完結して動く必要がある。
@@ -218,6 +218,21 @@
     <div class="sec">Googleカレンダー連携</div>
     <div class="gcal-box">
       <div id="gcalStatus" class="gcal-status">未接続</div>
+
+      <details class="adv bridge" id="bridgeAdv">
+        <summary>かんたん接続（おすすめ・再接続なし）</summary>
+        <label class="field"><span>ブリッジURL</span>
+          <input id="bridgeUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec"
+                 autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>合言葉</span>
+          <input id="bridgeKey" type="text" placeholder="スクリプトに書いたのと同じ文字列"
+                 autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <div class="sheet-btns tight">
+          <button type="button" id="bridgeSave" class="btn primary">保存してつなぐ</button>
+          <button type="button" id="bridgeClear" class="btn ghost">外す</button>
+        </div>
+        <small>一度つなげば、スマホでもPCでも1時間ごとの再接続が要りません。URLと合言葉を1行で貼ってもOK。</small>
+      </details>
       <div class="sheet-btns tight">
         <button type="button" id="gcalConnect" class="btn primary">接続する</button>
         <button type="button" id="gcalDisconnect" class="btn ghost">切断</button>
@@ -307,7 +322,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="gcal.js?v=1100"></script>
-<script src="app.js?v=1100"></script>
+<script src="gcal.js?v=2000"></script>
+<script src="app.js?v=2000"></script>
 </body>
 </html>

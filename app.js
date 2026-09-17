@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.10.0';
+  var VERSION = '2.0.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // 自分のカレンダー（仮想タブ）
   var TEAM_TAB = '__team__';   // みんなのカレンダー（仮想タブ）
@@ -985,6 +985,13 @@
   function gstatus() {
     var el = $('gcalStatus');
     var g = S.settings.gcal;
+    if (GCal.usesBridge && GCal.usesBridge()) {
+      el.textContent = 'かんたん接続中' + (g.account ? '（' + g.account + '）' : '') +
+        (g.lastSync ? ' / 最終同期 ' + g.lastSync : '') + ' ・ 再接続は不要です';
+      el.className = 'gcal-status ok';
+      updateGcalHint();
+      return;
+    }
     if (!g.clientId) { el.textContent = '未設定：クライアントIDを登録してください'; el.className = 'gcal-status'; }
     else if (GCal.isConnected()) {
       el.textContent = '接続中' + (g.calendarName ? '（' + g.calendarName + '）' : '') + (g.lastSync ? ' / 最終同期 ' + g.lastSync : '');
@@ -995,11 +1002,18 @@
     }
     updateGcalHint();
   }
+  /** カレンダーに送る中身の指紋。これが変わっていなければ送り直さない */
+  function todoSig(t) {
+    return JSON.stringify([t.text, t.note || '', !!t.done, t.dueDate || '', t.dueTime || '', t.repeat || {}, t.color || 0]);
+  }
+  /** 以前の保存形式（APIのID）と、ブリッジのID（末尾@google.com）を同じものとして扱う */
+  function normEventId(id) { return String(id || '').replace(/@google\.com$/, ''); }
+
   function pushOne(t, silent) {
     var g = S.settings.gcal;
     if (!GCal.isConnected() || !g.calendarId || !t.dueDate) return Promise.resolve();
     return GCal.push(g.calendarId, t).then(function (id) {
-      t.gcalEventId = id; save(); renderList();
+      t.gcalEventId = id; t.gcalSig = todoSig(t); save(); renderList();
       if (!silent) toast('カレンダーに登録しました');
     }).catch(function (e) {
       if (!silent) toast('カレンダー登録に失敗：' + e.message);
@@ -1035,7 +1049,10 @@
     if (!g.calendarId) { if (manual) toast('同期先カレンダーを選んでください'); return Promise.resolve(); }
 
     var pushList = S.todos.filter(function (t) {
-      return t.dueDate && !t.done && t.source !== 'gcal' && (g.auto || t.gcalEventId);
+      if (!t.dueDate || t.done || t.source === 'gcal') return false;
+      if (!(g.auto || t.gcalEventId)) return false;
+      // すでに送ってあって中身も変わっていないものは、3分ごとに送り直さない
+      return !t.gcalEventId || t.gcalSig !== todoSig(t);
     });
     var pushed = 0, imported = 0;
 
@@ -1043,6 +1060,7 @@
       return p.then(function () {
         return GCal.push(g.calendarId, t).then(function (id) {
           if (t.gcalEventId !== id) { t.gcalEventId = id; }
+          t.gcalSig = todoSig(t);
           pushed++;
         }).catch(function (e) { syncErrors++; glog('送信失敗: ' + t.text + ' — ' + e.message); });
       });
@@ -1053,13 +1071,19 @@
       return GCal.listUpcoming(g.calendarId, Number(g.importDays)).then(function (evs) {
         var tab = ensureImportTab();
         var known = {};
-        S.todos.forEach(function (t) { if (t.gcalEventId) known[t.gcalEventId] = t; });
+        S.todos.forEach(function (t) {
+          if (!t.gcalEventId) return;
+          known[normEventId(t.gcalEventId) + '|' + (t.dueDate || '')] = t;
+          if (!known[normEventId(t.gcalEventId)]) known[normEventId(t.gcalEventId)] = t;
+        });
         evs.forEach(function (e) {
           if (e.fromTodolink) return;
-          if (known[e.id]) {
-            known[e.id].text = e.title;
-            known[e.id].dueDate = e.date;
-            known[e.id].dueTime = e.time;
+          // 繰り返し予定は同じIDで日付違いが並ぶので「ID＋日付」で見分ける
+          var hit = known[normEventId(e.id) + '|' + e.date] || (!e.recurring && known[normEventId(e.id)]);
+          if (hit) {
+            hit.text = e.title;
+            hit.dueDate = e.date;
+            hit.dueTime = e.time;
             return;
           }
           S.todos.push({
@@ -1452,6 +1476,55 @@
       });
     };
     $('gcalAccount').onchange = function () { S.settings.gcal.account = this.value.trim(); save(true); };
+
+    // かんたん接続（ブリッジ）。URLと合言葉を1行で貼っても分けて読む
+    $('bridgeSave').onclick = function () {
+      var g = S.settings.gcal;
+      var url = $('bridgeUrl').value.trim();
+      var key = $('bridgeKey').value.trim();
+      var parts = url.split(/\s+/);
+      if (parts.length > 1) { url = parts[0]; if (!key) key = parts[1]; }
+      if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url) && !/^http:\/\/localhost[:/]/.test(url)) {
+        toast('URLは https://script.google.com/ で始まるものを貼ってください');
+        return;
+      }
+      if (!key) { toast('合言葉を入れてください'); return; }
+      $('bridgeUrl').value = url; $('bridgeKey').value = key;
+
+      GCal.setBridge(url, key);
+      setSyncUI('busy');
+      GCal.connect().then(function () {
+        return GCal.whoami();
+      }).then(function (mail) {
+        g.bridgeUrl = url; g.bridgeKey = key;
+        if (mail) { g.account = mail; $('gcalAccount').value = mail; }
+        save(true);
+        glog('かんたん接続しました' + (mail ? '（' + mail + '）' : ''));
+        return loadCalendars();
+      }).then(function () {
+        S.calCache.at = 0; S.teamCache.at = 0;
+        gstatus();
+        toast('つながりました。もう再接続は要りません');
+        return syncEverything(true);
+      }).catch(function (e) {
+        // 失敗したら元の方式に戻しておく（設定は保存しない）
+        GCal.setBridge(g.bridgeUrl || '', g.bridgeKey || '');
+        setSyncUI(GCal.isConnected() ? 'ok' : 'off');
+        toast('つながりません：' + e.message);
+        glog('かんたん接続失敗: ' + e.message);
+        gstatus();
+      });
+    };
+    $('bridgeClear').onclick = function () {
+      var g = S.settings.gcal;
+      g.bridgeUrl = ''; g.bridgeKey = '';
+      save(true);
+      GCal.setBridge('', '');
+      $('bridgeUrl').value = ''; $('bridgeKey').value = '';
+      setSyncUI(GCal.isConnected() ? 'ok' : 'off');
+      gstatus();
+      toast('かんたん接続を外しました');
+    };
     $('gcalDisconnect').onclick = function () {
       GCal.disconnect().then(function () { lastSyncAt = 0; setSyncUI('off'); gstatus(); glog('切断しました'); toast('切断しました'); });
     };
@@ -1525,8 +1598,11 @@
     $('setResetTime').value = st.resetTime || '04:00';
     $('setNotify').checked = !!st.notify;
     $('gcalClientId').value = st.gcal.clientId || '';
+    $('bridgeUrl').value = st.gcal.bridgeUrl || '';
+    $('bridgeKey').value = st.gcal.bridgeKey || '';
     // クライアントID未設定なら折りたたみを開いておく（入力欄が隠れていて気づけない事故を防ぐ）
-    if ($('gcalAdv')) $('gcalAdv').open = !st.gcal.clientId;
+    if ($('gcalAdv')) $('gcalAdv').open = false;
+    if ($('bridgeAdv')) $('bridgeAdv').open = !st.gcal.bridgeUrl;
     $('gcalAccount').value = st.gcal.account || '';
     $('gcalAuto').checked = !!st.gcal.auto;
     $('gcalDeleteOnDone').checked = !!st.gcal.deleteOnDone;
@@ -1604,6 +1680,8 @@
     wireSheetDismiss();
     bind();
     GCal.setClientId(S.settings.gcal.clientId || '');
+    // かんたん接続が設定済みなら、Googleログインを使わずブリッジで動く
+    GCal.setBridge(S.settings.gcal.bridgeUrl || '', S.settings.gcal.bridgeKey || '');
     // 認証ライブラリを先に読み込む。iOS Safari はボタン押下から時間が空くと
     // ポップアップを塞ぐため、押した瞬間に認証を始められる状態にしておく。
     if (GCal.preload) GCal.preload();

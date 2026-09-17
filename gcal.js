@@ -21,8 +21,31 @@
     clientId: '',
     tokenClient: null,
     token: null,     // {access_token, exp}
-    gisReady: false
+    gisReady: false,
+    bridge: null     // {url, key} … 設定されていればGoogleログインを使わずブリッジ経由で動く
   };
+
+  /* ---------- ブリッジ（Google Apps Script）経由 ---------- */
+  function bridgeCall(action, payload) {
+    var body = Object.assign({ action: action, key: state.bridge.key, tz: tz() }, payload || {});
+    return fetch(state.bridge.url, {
+      method: 'POST',
+      // text/plain にするとブラウザの事前確認（preflight）が走らず、Apps Script にそのまま届く
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      redirect: 'follow'
+    }).then(function (r) {
+      return r.text().then(function (txt) {
+        var j;
+        try { j = JSON.parse(txt); }
+        catch (e) { throw new Error('ブリッジの応答が読めません（URLとデプロイの「アクセスできるユーザー＝全員」を確認）'); }
+        if (!j || !j.ok) throw new Error((j && j.error) || 'ブリッジでエラーが起きました');
+        return j;
+      });
+    }, function () {
+      throw new Error('ブリッジにつながりません（URLを確認）');
+    });
+  }
 
   function loadGis() {
     if (state.gisReady) return Promise.resolve();
@@ -178,32 +201,43 @@
   var GCal = {
     PRIVATE_KEY: PRIVATE_KEY,
 
+    /** ブリッジを使う（url と key が両方あるとき）。空なら従来のGoogleログイン方式に戻る */
+    setBridge: function (url, key) {
+      url = (url || '').trim(); key = (key || '').trim();
+      state.bridge = (url && key) ? { url: url, key: key } : null;
+    },
+    usesBridge: function () { return !!state.bridge; },
+
     /** Googleのライブラリを先に読み込んでおく。
      *  iOS Safari はボタン押下から時間が空くとポップアップを塞ぐので、
      *  接続ボタンを押した瞬間に同期的に認証を開始できる状態にしておく必要がある。 */
-    preload: function () { return loadGis().catch(function () {}); },
+    preload: function () { return state.bridge ? Promise.resolve() : loadGis().catch(function () {}); },
 
     /** アクセス権が切れるまでの残りミリ秒。未接続なら0 */
     expiresIn: function () {
+      if (state.bridge) return Infinity;   // ブリッジは期限切れにならない
       var t = state.token || loadStoredToken();
       return t ? Math.max(0, t.exp - Date.now()) : 0;
     },
     /** 画面を出さずに更新を試みる（iOSでは失敗することがある） */
-    refresh: function () { return getToken(false); },
+    refresh: function () { return state.bridge ? Promise.resolve() : getToken(false); },
 
     setClientId: function (id) {
       if (id !== state.clientId) { state.tokenClient = null; }
       state.clientId = (id || '').trim();
     },
-    hasClientId: function () { return !!state.clientId; },
+    hasClientId: function () { return !!state.bridge || !!state.clientId; },
     isConnected: function () {
+      if (state.bridge) return true;
       var t = state.token || loadStoredToken();
       return !!(t && t.exp > Date.now());
     },
     connect: function () {
+      if (state.bridge) return bridgeCall('ping').then(function () { return true; });
       return loadGis().then(function () { return getToken(true); }).then(function () { return true; });
     },
     disconnect: function () {
+      if (state.bridge) return Promise.resolve();
       var t = state.token || loadStoredToken();
       storeToken(null);
       state.tokenClient = null;
@@ -215,6 +249,12 @@
 
     /** all=true なら読めるカレンダーを全部（書き込めないものも含む） */
     listCalendars: function (all) {
+      if (state.bridge) {
+        return bridgeCall('calendars').then(function (j) {
+          var list = j.calendars || [];
+          return all ? list : list.filter(function (c) { return c.canWrite || c.primary; });
+        });
+      }
       var role = all ? 'reader' : 'writer';
       return api('/users/me/calendarList?minAccessRole=' + role + '&maxResults=100').then(function (r) {
         return (r.items || []).filter(function (c) { return !c.deleted; }).map(function (c) {
@@ -232,11 +272,19 @@
 
     /** ログイン中のアカウントのメールアドレス */
     whoami: function () {
+      if (state.bridge) return bridgeCall('ping').then(function (j) { return j.account || ''; });
       return api('/calendars/primary').then(function (r) { return (r && r.id) || ''; });
     },
 
     /** 複数カレンダーの予定をまとめて取得し、開始順に並べて返す */
     listUpcomingMulti: function (cals, days) {
+      if (state.bridge) {
+        // ブリッジは複数カレンダーを1回でまとめて返す（並べ替え済み）
+        return bridgeCall('events', {
+          calendarIds: (cals || []).map(function (c) { return c.id; }),
+          days: days
+        }).then(function (j) { return j.events || []; });
+      }
       var self = this;
       var out = [];
       return cals.reduce(function (p, c) {
@@ -262,6 +310,9 @@
 
     /** ToDoをカレンダーに作成／更新。イベントIDを返す */
     push: function (calendarId, todo) {
+      if (state.bridge) {
+        return bridgeCall('upsert', { calendarId: calendarId, todo: todo }).then(function (j) { return j.id; });
+      }
       var body = buildEvent(todo);
       var cal = encodeURIComponent(calendarId);
       if (todo.gcalEventId) {
@@ -278,12 +329,18 @@
     },
 
     remove: function (calendarId, eventId) {
+      if (state.bridge) {
+        return bridgeCall('remove', { calendarId: calendarId, eventId: eventId }).then(function () { return null; });
+      }
       return api('/calendars/' + encodeURIComponent(calendarId) + '/events/' + encodeURIComponent(eventId), { method: 'DELETE' })
         .catch(function (e) { if (e.status === 404 || e.status === 410) return null; throw e; });
     },
 
     /** 直近 days 日ぶんの予定を取得（このアプリ由来かどうかも返す） */
     listUpcoming: function (calendarId, days) {
+      if (state.bridge) {
+        return bridgeCall('events', { calendarIds: [calendarId], days: days }).then(function (j) { return j.events || []; });
+      }
       var now = new Date();
       var from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       var to = new Date(from.getTime() + days * 86400000);
