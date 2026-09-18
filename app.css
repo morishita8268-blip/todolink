@@ -416,3 +416,8 @@ html[data-dark="true"] .qa-colors button{border-color:rgba(255,255,255,.18)}
 .adv.bridge{margin:12px 0 4px;padding:10px 12px;border-radius:11px;background:var(--card);border:1px solid var(--accent)}
 .adv.bridge summary{color:var(--accent);font-weight:600}
 .adv.bridge small{display:block;color:var(--ink-3);font-size:.72rem;margin-top:8px;line-height:1.6}
+
+/* 本文から自動で読み取った日時は点線で示す（手で決めたものと見分ける） */
+.qa-chip.auto{border-style:dashed}
+.qa-chips.times{padding-top:8px}
+.qa-chips.times .qa-chip{padding:6px 10px}

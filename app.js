@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2.0.0';
+  var VERSION = '2.1.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // 自分のカレンダー（仮想タブ）
   var TEAM_TAB = '__team__';   // みんなのカレンダー（仮想タブ）
@@ -767,12 +767,21 @@
   /** 「今日」「明日」を1タップで入れる */
   function setQuickDay(offset) {
     var want = ymd(new Date(Date.now() + offset * 86400000));
-    if (pendingDue.dueDate === want && !pendingDue.dueTime) {
+    if (pendingDue.dueDate === want && !pendingDue.auto) {
       clearPendingDue();          // もう一度押したら解除
+      pendingDue.manual = true;
     } else {
-      pendingDue = { dueDate: want, dueTime: '', repeat: { type: 'none' } };
-      showDuePreview();
+      // 日付だけ差し替えて、決めてあった時刻は残す
+      pendingDue = { dueDate: want, dueTime: pendingDue.dueTime || '', repeat: { type: 'none' }, manual: true };
     }
+    showDuePreview();
+  }
+  function setQuickTime(t) {
+    if (!pendingDue.dueDate) pendingDue.dueDate = today();
+    pendingDue.dueTime = t;
+    pendingDue.manual = true;
+    pendingDue.auto = false;
+    showDuePreview();
   }
 
   function showDuePreview() {
@@ -792,12 +801,26 @@
       var on = pendingDue.dueDate === want;
       if ($(p[0])) $(p[0]).classList.toggle('on', on);
     });
+    // 日付が決まったら、その場で時刻を選べる列を出す（別画面を開かせない）
+    var times = $('qaTimes');
+    if (times) {
+      times.hidden = !pendingDue.dueDate;
+      Array.prototype.forEach.call(times.querySelectorAll('[data-t]'), function (b) {
+        b.classList.toggle('on', !!pendingDue.dueDate && (pendingDue.dueTime || '') === b.dataset.t);
+      });
+    }
+    btn.classList.toggle('auto', !!pendingDue.auto);
     updateGcalHint();
   }
   /** 「カレンダーに入るのか」を追加画面で常に見せる */
   function updateGcalHint() {
     var el = $('gcalHint');
     var g = S.settings.gcal;
+    if (pendingDue.auto && pendingDue.dueDate) {
+      el.textContent = '⏰ 本文から日時を読み取りました（違えば×）';
+      el.className = 'composer-hint on';
+      return;
+    }
     if (GCal.isConnected() && g.calendarId && g.auto) {
       el.textContent = '📅 自動でカレンダーに追加されます';
       el.className = 'composer-hint on';
@@ -829,8 +852,14 @@
     $('weekdayRow').hidden = v !== 'weekly';
     $('monthdayRow').hidden = v !== 'monthly';
   }
+  /** 日付(dueDate)と時刻(dueTime)を正本にして、見える部品をそろえる。
+      時刻あり → 1つの「日時」ピッカー／終日 → 日付だけのピッカー */
   function syncQuickRows() {
     var d = $('dueDate').value, t = $('dueTime').value;
+    var allDay = !t;
+    $('dueDTRow').hidden = allDay && !!d;
+    $('dueDateRow').hidden = !(allDay && d);
+    $('dueDT').value = (d && t) ? d + 'T' + t : '';
     Array.prototype.forEach.call(document.querySelectorAll('.quick[data-day]'), function (b) {
       var want = ymd(new Date(Date.now() + Number(b.dataset.day) * 86400000));
       b.classList.toggle('on', !!d && d === want);
@@ -838,6 +867,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('.quick[data-time]'), function (b) {
       b.classList.toggle('on', !!t && t === b.dataset.time);
     });
+    $('dueAllDay').classList.toggle('on', !!d && allDay);
   }
   function syncDueNote() {
     var el = $('dueGcalNote');
@@ -880,6 +910,86 @@
   }
 
   /* 追加シート */
+  /* ---------------- 本文から日時を読み取る ----------------
+     「明日18時」「9/16 11:00」「来週月曜10時」「午後3時半」などを拾う。
+     本文は書き換えない（「明日の会議資料」の"明日"を消すと意味が壊れるため）。 */
+  function parseDue(text) {
+    var s = String(text || '');
+    try { s = s.normalize('NFKC'); } catch (e) {}   // 全角の数字・コロン・スラッシュを半角に
+    var now = new Date();
+    var base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var addD = function (d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); };
+    var date = null, m;
+
+    // --- 日付 ---
+    if (/明後日|あさって/.test(s)) date = addD(base, 2);
+    else if (/明日|あした|あす(?![ぁ-ん])/.test(s)) date = addD(base, 1);
+    else if (/今日|きょう|本日/.test(s)) date = base;
+
+    if (!date) {
+      // 「9/16」「9月16日」。前が数字のものは年の一部（2026/9/16の"26/9"など）なので飛ばす
+      var re = /(^|[^\d])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})(?!\d)/g;
+      while ((m = re.exec(s))) {
+        var mo = +m[2], dd = +m[3];
+        if (mo < 1 || mo > 12 || dd < 1 || dd > 31) continue;
+        var cand = new Date(base.getFullYear(), mo - 1, dd);
+        if (cand.getMonth() !== mo - 1) continue;                    // 2/31 などは無視
+        if (cand < addD(base, -7)) cand = new Date(base.getFullYear() + 1, mo - 1, dd);  // だいぶ過去なら来年
+        date = cand;
+        break;
+      }
+    }
+    if (!date && (m = s.match(/(再来週|来週)?\s*の?\s*([月火水木金土日])曜/))) {
+      var wd = '日月火水木金土'.indexOf(m[2]);
+      if (m[1]) {
+        // 来週＝次の月曜から始まる週。再来週はさらに1週先
+        var toMon = ((1 - base.getDay() + 7) % 7) || 7;
+        var mon = addD(base, toMon + (m[1] === '再来週' ? 7 : 0));
+        date = addD(mon, (wd + 6) % 7);
+      } else {
+        date = addD(base, (wd - base.getDay() + 7) % 7);            // 今日を含む直近のその曜日
+      }
+    }
+
+    // --- 時刻 ---
+    var h = null, mi = 0;
+    // 「11:00」「11:00〜12:00」は先頭を採用。16:9 のような比率は分が1桁なので拾わない
+    if ((m = s.match(/(^|[^\d])(\d{1,2}):(\d{2})(?!\d)/))) {
+      h = +m[2]; mi = +m[3];
+    } else if ((m = s.match(/(午前|午後|朝|夜|夕方)?\s*(\d{1,2})\s*時(?!間)\s*(半|(\d{1,2})\s*分)?/))) {
+      h = +m[2];
+      mi = m[3] === '半' ? 30 : (m[4] ? +m[4] : 0);
+      if ((m[1] === '午後' || m[1] === '夜' || m[1] === '夕方') && h < 12) h += 12;
+      if (m[1] === '午前' && h === 12) h = 0;
+    }
+    var time = '';
+    if (h !== null && h >= 0 && h <= 24 && mi >= 0 && mi < 60) {
+      time = pad(h % 24) + ':' + pad(mi);
+    }
+
+    if (!date && !time) return null;
+    // 時刻だけ書いてあれば今日。その時刻をもう過ぎていれば明日
+    if (!date) {
+      date = base;
+      var t = time.split(':').map(Number);
+      if (new Date(base.getFullYear(), base.getMonth(), base.getDate(), t[0], t[1]) < now) date = addD(base, 1);
+    }
+    return { dueDate: ymd(date), dueTime: time, repeat: { type: 'none' } };
+  }
+
+  /** 入力中の本文から日時を拾って、手で決めていなければ反映する */
+  function autoDueFromText() {
+    if (pendingDue.manual) return;
+    var got = parseDue($('addInput').value);
+    if (got) {
+      got.auto = true;
+      pendingDue = got;
+    } else if (pendingDue.auto) {
+      pendingDue = { dueDate: '', dueTime: '', repeat: { type: 'none' } };
+    }
+    showDuePreview();
+  }
+
   /** 色の丸を並べる。押した瞬間に選択が決まる（別画面を挟まない） */
   function renderQuickColors() {
     var el = $('qaColors');
@@ -1346,7 +1456,7 @@
     // 追加
     $('fab').onclick = openAdd;
     $('addOk').onclick = submitAdd;
-    $('addInput').addEventListener('input', refreshAddBtn);
+    $('addInput').addEventListener('input', function () { refreshAddBtn(); autoDueFromText(); });
     $('qaToday').onclick = function () { setQuickDay(0); };
     $('qaTomorrow').onclick = function () { setQuickDay(1); };
     $('addInput').addEventListener('keydown', function (e) {
@@ -1356,10 +1466,26 @@
 
     // 日付と時間
     $('btnDue').onclick = function () { openDue('compose', pendingDue); };
-    $('btnDueClear').onclick = function () { clearPendingDue(); };
+    $('btnDueClear').onclick = function () { clearPendingDue(); pendingDue.manual = true; };
+    Array.prototype.forEach.call(document.querySelectorAll('#qaTimes [data-t]'), function (b) {
+      b.onclick = function () { setQuickTime(b.dataset.t); };
+    });
     $('dueRepeat').onchange = syncRepeatRows;
     $('dueDate').onchange = syncQuickRows;
-    $('dueTime').onchange = syncQuickRows;
+    // 1つのピッカーで選んだ「日時」を、日付と時刻に分けて持つ
+    $('dueDT').onchange = function () {
+      var v = this.value || '';
+      if (v.indexOf('T') > 0) {
+        $('dueDate').value = v.slice(0, 10);
+        $('dueTime').value = v.slice(11, 16);
+      }
+      syncQuickRows();
+    };
+    $('dueAllDay').onclick = function () {
+      if (!$('dueDate').value) $('dueDate').value = today();
+      $('dueTime').value = '';
+      syncQuickRows();
+    };
     Array.prototype.forEach.call(document.querySelectorAll('.quick[data-day]'), function (b) {
       b.onclick = function () {
         $('dueDate').value = ymd(new Date(Date.now() + Number(b.dataset.day) * 86400000));
@@ -1368,7 +1494,7 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll('.quick[data-time]'), function (b) {
       b.onclick = function () {
-        $('dueTime').value = ($('dueTime').value === b.dataset.time) ? '' : b.dataset.time;
+        $('dueTime').value = b.dataset.time;          // 終日は「終日」ボタンで選ぶ
         if (!$('dueDate').value) $('dueDate').value = today();
         syncQuickRows();
       };
@@ -1376,6 +1502,7 @@
     $('dueOk').onclick = function () {
       var d = readDue();
       if (dueTarget === 'compose') {
+        d.manual = true;
         pendingDue = d; showDuePreview();
       } else if (dueTarget === 'row') {
         // 行のカレンダーボタンから来た場合：その場で本体に書いて送る
