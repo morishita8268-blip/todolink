@@ -207,6 +207,11 @@
       state.bridge = (url && key) ? { url: url, key: key } : null;
     },
     usesBridge: function () { return !!state.bridge; },
+    /** ToDoの中身をブリッジ経由で共有する。data=null なら読むだけ */
+    shareState: function (data) {
+      if (!state.bridge) return Promise.reject(new Error('かんたん接続が未設定です'));
+      return bridgeCall('state', { data: data }).then(function (j) { return j.data || null; });
+    },
 
     /** Googleのライブラリを先に読み込んでおく。
      *  iOS Safari はボタン押下から時間が空くとポップアップを塞ぐので、

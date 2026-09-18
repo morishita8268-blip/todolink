@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2.2.0';
+  var VERSION = '2.3.0';
   var KEY = 'todolink.state.v1';
   var GCAL_TAB = '__gcal__';   // 自分のカレンダー（仮想タブ）
   var TEAM_TAB = '__team__';   // みんなのカレンダー（仮想タブ）
@@ -70,8 +70,132 @@
   var saveTimer = null;
   function save(now) {
     clearTimeout(saveTimer);
-    var go = function () { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('保存できませんでした（容量不足？）'); } };
+    var go = function () {
+      var changed = stampChanges();
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('保存できませんでした（容量不足？）'); }
+      if (changed) scheduleShare();
+    };
     if (now) go(); else saveTimer = setTimeout(go, 120);
+  }
+
+  /* ---------------- 端末どうしで中身を揃える ----------------
+   * ToDo・タブ1件ごとに「最後に変えた時刻(u)」を付け、消したものは deleted に時刻を残す。
+   * かんたん接続のブリッジに預けた中身と1件ずつ突き合わせ、新しいほうを残す。 */
+  var snap = {};          // id → 前回保存時の中身（変更検出用）
+  function fpOf(it) { var c = Object.assign({}, it); delete c.u; return JSON.stringify(c); }
+  function shareMeta() {
+    if (!S.share) S.share = { deleted: {}, synced: false, at: 0 };
+    if (!S.share.deleted) S.share.deleted = {};
+    return S.share;
+  }
+  function takeSnap() {
+    snap = {};
+    S.tabs.forEach(function (t, i) { t.o = i; snap[t.id] = fpOf(t); });
+    S.todos.forEach(function (t) { snap[t.id] = fpOf(t); });
+  }
+  /** 前回の保存から変わった項目に時刻を付け、消えた項目を deleted に記録する。変化があれば true */
+  function stampChanges() {
+    var now = Date.now(), seen = {}, changed = false, del = shareMeta().deleted;
+    function visit(it) {
+      seen[it.id] = 1;
+      var fp = fpOf(it);
+      if (snap[it.id] !== fp) { it.u = now; snap[it.id] = fp; changed = true; }
+      if (!it.u) it.u = now;
+    }
+    S.tabs.forEach(function (t, i) { t.o = i; visit(t); });
+    S.todos.forEach(visit);
+    Object.keys(snap).forEach(function (id) {
+      if (!seen[id]) { del[id] = now; delete snap[id]; changed = true; }
+    });
+    return changed;
+  }
+  function packShare() {
+    return { tabs: S.tabs, todos: S.todos, deleted: shareMeta().deleted };
+  }
+  function mergeShare(a, b) {
+    var deleted = {}, limit = Date.now() - 60 * 86400000;
+    [a.deleted || {}, b.deleted || {}].forEach(function (d) {
+      Object.keys(d).forEach(function (id) {
+        if (d[id] > limit && (!deleted[id] || d[id] > deleted[id])) deleted[id] = d[id];
+      });
+    });
+    function pick(x, y) {
+      var m = {};
+      (x || []).concat(y || []).forEach(function (it) {
+        if (!it || !it.id) return;
+        var cur = m[it.id];
+        if (!cur || (it.u || 0) >= (cur.u || 0)) m[it.id] = it;
+      });
+      return Object.keys(m).map(function (k) { return m[k]; }).filter(function (it) {
+        return !(deleted[it.id] && deleted[it.id] >= (it.u || 0));
+      });
+    }
+    var tabs = pick(a.tabs, b.tabs).sort(function (p, q) { return (p.o || 0) - (q.o || 0); });
+    return { tabs: tabs, todos: pick(a.todos, b.todos), deleted: deleted };
+  }
+  /** はじめて揃えるとき、同じ名前のタブ（やること・スケジュール等）は1つにまとめる */
+  function adoptTabsByName(remote) {
+    var now = Date.now(), del = shareMeta().deleted;
+    var byName = {};
+    (remote.tabs || []).forEach(function (t) { byName[t.name] = t; });
+    S.tabs = S.tabs.filter(function (t) {
+      var r = byName[t.name];
+      if (!r || r.id === t.id) return true;
+      S.todos.forEach(function (x) { if (x.tabId === t.id) { x.tabId = r.id; x.u = now; } });
+      if (S.activeTabId === t.id) S.activeTabId = r.id;
+      if (S.lastRealTabId === t.id) S.lastRealTabId = r.id;
+      del[t.id] = now;
+      delete snap[t.id];
+      return false;
+    });
+  }
+  function sameShare(a, b) {
+    return JSON.stringify([a.tabs, a.todos]) === JSON.stringify([b.tabs, b.todos]);
+  }
+
+  var sharing = false, shareAgain = false, shareTimer = null;
+  function scheduleShare() {
+    if (!window.GCal || !GCal.usesBridge()) return;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(function () { shareNow(); }, 2500);
+  }
+  /** 読む → 手元と突き合わせる → 違いがあれば預け直す */
+  function shareNow() {
+    if (!window.GCal || !GCal.usesBridge()) return Promise.resolve(false);
+    if (sharing) { shareAgain = true; return Promise.resolve(false); }
+    sharing = true;
+    save(true);
+    var meta = shareMeta();
+    return GCal.shareState(null).then(function (remote) {
+      remote = remote || { tabs: [], todos: [], deleted: {} };
+      if (!meta.synced && (remote.tabs || []).length) adoptTabsByName(remote);
+      var merged = mergeShare(remote, packShare());
+      if (!merged.tabs.length) merged.tabs = S.tabs;
+      // タブが消えたToDoは先頭のタブへ
+      var tabIds = {};
+      merged.tabs.forEach(function (t) { tabIds[t.id] = 1; });
+      merged.todos.forEach(function (t) { if (!tabIds[t.tabId]) { t.tabId = merged.tabs[0].id; t.u = Date.now(); } });
+
+      var before = JSON.stringify([S.tabs, S.todos]);
+      S.tabs = merged.tabs; S.todos = merged.todos; meta.deleted = merged.deleted;
+      if (S.activeTabId !== GCAL_TAB && S.activeTabId !== TEAM_TAB && !tabsById(S.activeTabId)) S.activeTabId = S.tabs[0].id;
+      if (!tabsById(S.lastRealTabId)) S.lastRealTabId = S.tabs[0].id;
+      takeSnap();
+      meta.synced = true; meta.at = Date.now();
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+      if (JSON.stringify([S.tabs, S.todos]) !== before) { renderTabs(); renderList(); }
+      if (!sameShare(merged, remote) || Object.keys(merged.deleted).length !== Object.keys(remote.deleted || {}).length) {
+        return GCal.shareState(packShare()).then(function () { return true; });
+      }
+      return true;
+    }).then(function (r) {
+      sharing = false;
+      if (shareAgain) { shareAgain = false; scheduleShare(); }
+      return r;
+    }, function (e) {
+      sharing = false;
+      throw e;
+    });
   }
 
   /* ---------------- helpers ---------------- */
@@ -1352,7 +1476,11 @@
     syncErrors = 0;
     syncIsManual = !!manual;
     setSyncUI('busy');
-    return keepAlive().then(function () { return syncAll(manual); })
+    return keepAlive()
+      .then(function () {
+        return shareNow().catch(function (e) { syncErrors++; glog('ToDo共有エラー: ' + e.message); });
+      })
+      .then(function () { return syncAll(manual); })
       .then(function () { return loadCalView(true, 'mine'); })
       .then(function () { return loadCalView(true, 'team'); })
       .catch(function (e) { syncErrors++; glog('同期エラー: ' + e.message); })
@@ -1738,7 +1866,9 @@
           'いまのToDo（' + S.todos.length + '件）と設定を、このファイルの内容（' + obj.todos.length + '件）で置き換えます。',
           '置き換える').then(function (ok) {
             if (!ok) return;
+            var keepShare = S.share;
             S = obj;
+            S.share = keepShare;
             S.settings = Object.assign({}, defaults().settings, S.settings || {});
             S.settings.gcal = Object.assign({}, defaults().settings.gcal, S.settings.gcal || {});
             save(true); applyLook(); renderTabs(); renderList(); fillSettings();
@@ -1857,6 +1987,7 @@
 
   function start() {
     S = load();
+    takeSnap();
     blockZoomGestures();
     watchViewport();
     applyLook();

@@ -40,6 +40,8 @@ function doPost(e) {
       case 'remove':
         remove_(req.calendarId, req.eventId);
         return json_({ ok: true });
+      case 'state':
+        return json_({ ok: true, data: state_(req.data || null) });
       default:
         return json_({ ok: false, error: '知らない操作です: ' + req.action });
     }
@@ -239,4 +241,75 @@ function upsert_(calendarId, t, tz) {
 function remove_(calendarId, eventId) {
   var s = findSeries_(calOf_(calendarId), eventId);
   if (s) s.deleteEventSeries();
+}
+
+/* ---------- ToDoの中身を端末どうしで共有する ---------- */
+// 保存先はこのスクリプトの「スクリプト プロパティ」。1項目あたりの上限があるので細切れにして置く。
+// 追加の権限（ドライブ等）は要らない。
+
+var STATE_PREFIX = 'state_';
+var CHUNK = 2000;
+var TOMB_DAYS = 60;
+
+function readState_() {
+  var props = PropertiesService.getScriptProperties();
+  var n = Number(props.getProperty(STATE_PREFIX + 'n') || 0);
+  if (!n) return null;
+  var all = props.getProperties();
+  var txt = '';
+  for (var i = 0; i < n; i++) txt += all[STATE_PREFIX + i] || '';
+  try { return JSON.parse(txt); } catch (e) { return null; }
+}
+
+function writeState_(data) {
+  var props = PropertiesService.getScriptProperties();
+  var txt = JSON.stringify(data);
+  var old = Number(props.getProperty(STATE_PREFIX + 'n') || 0);
+  var map = {};
+  var n = 0;
+  for (var i = 0; i < txt.length; i += CHUNK) map[STATE_PREFIX + (n++)] = txt.slice(i, i + CHUNK);
+  map[STATE_PREFIX + 'n'] = String(n);
+  props.setProperties(map);
+  for (var j = n; j < old; j++) props.deleteProperty(STATE_PREFIX + j);
+}
+
+/** 端末から来た中身と保管している中身を1件ずつ突き合わせ、新しいほうを残す */
+function mergeState_(a, b) {
+  a = a || { tabs: [], todos: [], deleted: {} };
+  b = b || { tabs: [], todos: [], deleted: {} };
+  var deleted = {};
+  var limit = Date.now() - TOMB_DAYS * 86400000;
+  [a.deleted || {}, b.deleted || {}].forEach(function (d) {
+    Object.keys(d).forEach(function (id) {
+      if (d[id] > limit && (!deleted[id] || d[id] > deleted[id])) deleted[id] = d[id];
+    });
+  });
+  function pick(x, y) {
+    var m = {};
+    (x || []).concat(y || []).forEach(function (it) {
+      if (!it || !it.id) return;
+      var cur = m[it.id];
+      if (!cur || (it.u || 0) >= (cur.u || 0)) m[it.id] = it;
+    });
+    return Object.keys(m).map(function (k) { return m[k]; }).filter(function (it) {
+      return !(deleted[it.id] && deleted[it.id] >= (it.u || 0));
+    });
+  }
+  var tabs = pick(a.tabs, b.tabs).sort(function (p, q) { return (p.o || 0) - (q.o || 0); });
+  return { tabs: tabs, todos: pick(a.todos, b.todos), deleted: deleted };
+}
+
+function state_(incoming) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var stored = readState_();
+    if (!incoming) return stored;
+    var merged = mergeState_(stored, incoming);
+    if (!merged.tabs.length && stored && stored.tabs && stored.tabs.length) merged.tabs = stored.tabs;
+    writeState_(merged);
+    return merged;
+  } finally {
+    lock.releaseLock();
+  }
 }
