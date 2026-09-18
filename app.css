@@ -421,3 +421,50 @@ html[data-dark="true"] .qa-colors button{border-color:rgba(255,255,255,.18)}
 .qa-chip.auto{border-style:dashed}
 .qa-chips.times{padding-top:8px}
 .qa-chips.times .qa-chip{padding:6px 10px}
+
+/* ---------- 日時ピッカー（スマホの親指で選ぶ・v2.2.0） ----------
+   押せる場所は高さ44px以上（iPhoneで指が外れない大きさ）にそろえる */
+.sheet-inner.due{padding-bottom:0}
+.due-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.due-head .sheet-title{margin-bottom:0}
+.due-summary{font-size:1.1rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;text-align:right}
+.due-label{display:flex;align-items:baseline;gap:8px;font-size:.74rem;font-weight:700;color:var(--ink-3);letter-spacing:.04em;margin:16px 0 8px}
+.due-label small{font-weight:400;letter-spacing:0}
+.due-days{
+  display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;
+  margin:0 -18px;padding:2px 18px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+.due-days::-webkit-scrollbar{display:none}
+.day-tile{
+  flex:0 0 auto;scroll-snap-align:start;min-width:64px;height:60px;border-radius:13px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  cursor:pointer;touch-action:manipulation;padding:0 8px;
+}
+.day-tile .dt-top{font-size:.72rem;color:var(--ink-3)}
+.day-tile .dt-date{font-size:1.02rem;font-weight:700;font-variant-numeric:tabular-nums}
+.day-tile.sat .dt-top{color:#3f7ee8}
+.day-tile.sun .dt-top{color:var(--danger)}
+.day-tile.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.day-tile.on .dt-top{color:rgba(255,255,255,.85)}
+.due-hours{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.hour-tile{
+  height:48px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  font-size:1rem;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;touch-action:manipulation;
+}
+.hour-tile.allday{color:var(--ink-2);font-size:.9rem}
+.hour-tile.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.hour-tile:active,.day-tile:active{transform:scale(.97)}
+.due-more{margin-top:16px;font-size:.85rem;color:var(--ink-2)}
+.due-more summary{padding:12px 0;cursor:pointer;min-height:44px;display:flex;align-items:center}
+.due-foot{
+  position:sticky;bottom:0;margin:14px -18px 0;padding:12px 18px calc(12px + env(safe-area-inset-bottom));
+  background:var(--sheet-bg);border-top:1px solid var(--line);
+}
+.due-foot .btn{min-height:48px}
+
+/* 追加パネルのボタンも親指サイズに */
+.qa-chip{min-height:40px;padding:8px 14px;font-size:.86rem}
+#qaTimes{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -12px;padding:8px 12px 2px}
+#qaTimes::-webkit-scrollbar{display:none}
+#qaTimes .qa-chip{flex:0 0 auto;min-width:60px;font-variant-numeric:tabular-nums}

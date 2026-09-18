@@ -10,7 +10,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="app.css?v=2100">
+<link rel="stylesheet" href="app.css?v=2200">
 <title>ToDoリンク</title>
 <script>
 /* 自己修復ブート — 外部ファイルより先に、ここだけで完結して動く必要がある。
@@ -110,14 +110,7 @@
       <button type="button" id="qaTomorrow" class="qa-chip">明日</button>
       <button type="button" id="btnDueClear" class="qa-chip x" hidden>×</button>
     </div>
-    <div id="qaTimes" class="qa-chips times" hidden>
-      <button type="button" class="qa-chip" data-t="09:00">9:00</button>
-      <button type="button" class="qa-chip" data-t="12:00">12:00</button>
-      <button type="button" class="qa-chip" data-t="15:00">15:00</button>
-      <button type="button" class="qa-chip" data-t="18:00">18:00</button>
-      <button type="button" class="qa-chip" data-t="21:00">21:00</button>
-      <button type="button" class="qa-chip" data-t="">終日</button>
-    </div>
+    <div id="qaTimes" class="qa-chips times" hidden></div>
     <div class="qa-foot">
       <span id="gcalHint" class="composer-hint"></span>
       <button type="button" id="addOk" class="qa-go">閉じる</button>
@@ -152,40 +145,39 @@
   </div>
 </div>
 
-<!-- 日付と時間 -->
+<!-- 日付と時間：スマホの親指で選ぶ前提。iPhone標準の日付/時刻ピッカーは使わない -->
 <div id="dueSheet" class="sheet" hidden>
-  <div class="sheet-inner">
-    <div class="sheet-title">日付と時間</div>
-    <div class="quick-row">
-      <button type="button" class="quick" data-day="0">今日</button>
-      <button type="button" class="quick" data-day="1">明日</button>
-      <button type="button" class="quick" data-day="2">明後日</button>
-      <button type="button" class="quick" data-day="7">来週</button>
+  <div class="sheet-inner due">
+    <div class="due-head">
+      <div class="sheet-title">日時</div>
+      <div id="dueSummary" class="due-summary">未設定</div>
     </div>
-    <div class="quick-row">
-      <button type="button" class="quick" data-time="09:00">9:00</button>
-      <button type="button" class="quick" data-time="12:00">12:00</button>
-      <button type="button" class="quick" data-time="15:00">15:00</button>
-      <button type="button" class="quick" data-time="18:00">18:00</button>
-      <button type="button" class="quick" data-time="21:00">21:00</button>
-      <button type="button" class="quick" id="dueAllDay">終日</button>
-    </div>
-    <!-- 日付と時間は1つのピッカーでまとめて選ぶ（別々に開かせない） -->
-    <label class="field" id="dueDTRow"><span>日時（まとめて選ぶ）</span><input id="dueDT" type="datetime-local"></label>
-    <label class="field" id="dueDateRow" hidden><span>日付（終日）</span><input id="dueDate" type="date"></label>
+
+    <div class="due-label">日付</div>
+    <div id="dueDays" class="due-days"></div>
+
+    <div class="due-label">時刻<small>押すとそのまま決定</small></div>
+    <div id="dueHours" class="due-hours"></div>
+
+    <details class="due-more" id="dueMore">
+      <summary>細かく指定・繰り返し</summary>
+      <label class="field"><span>もっと先の日付</span><input id="dueDate" type="date"></label>
+      <label class="field"><span>時刻（分まで）</span><input id="dueTimeFine" type="time"></label>
+      <label class="field"><span>繰り返し</span>
+        <select id="dueRepeat">
+          <option value="none">なし</option>
+          <option value="daily">毎日</option>
+          <option value="weekly">毎週（曜日指定）</option>
+          <option value="monthly">毎月（日付指定）</option>
+        </select>
+      </label>
+      <div id="weekdayRow" class="weekdays" hidden></div>
+      <label class="field" id="monthdayRow" hidden><span>毎月の日</span><input id="dueMonthday" type="number" min="1" max="31" value="1"></label>
+    </details>
     <input id="dueTime" type="hidden">
-    <label class="field"><span>繰り返し</span>
-      <select id="dueRepeat">
-        <option value="none">なし</option>
-        <option value="daily">毎日</option>
-        <option value="weekly">毎週（曜日指定）</option>
-        <option value="monthly">毎月（日付指定）</option>
-      </select>
-    </label>
-    <div id="weekdayRow" class="weekdays" hidden></div>
-    <label class="field" id="monthdayRow" hidden><span>毎月の日</span><input id="dueMonthday" type="number" min="1" max="31" value="1"></label>
+
     <div id="dueGcalNote" class="due-note"></div>
-    <div class="sheet-btns">
+    <div class="sheet-btns due-foot">
       <button type="button" id="dueClear" class="btn ghost">日時なし</button>
       <button type="button" id="dueOk" class="btn primary">決定</button>
     </div>
@@ -334,7 +326,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="gcal.js?v=2100"></script>
-<script src="app.js?v=2100"></script>
+<script src="gcal.js?v=2200"></script>
+<script src="app.js?v=2200"></script>
 </body>
 </html>
